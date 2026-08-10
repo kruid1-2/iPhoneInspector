@@ -1,0 +1,10 @@
+.build/
+dist/
+.DS_Store
+.performance-tools/
+
+# iPhone diagnostics can contain private metadata and must never be committed.
+diagnostics/
+
+# Temporary icon-build artifact.
+/t1-toc.xml
