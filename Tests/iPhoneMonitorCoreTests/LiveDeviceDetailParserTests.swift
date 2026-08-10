@@ -284,6 +284,14 @@ final class LiveDeviceDetailParserTests: XCTestCase {
         XCTAssertTrue(redacted.contains("<redacted>"))
     }
 
+    func testDiagnosticLoggingRedactsNetworkAddresses() {
+        let raw = "RSD endpoint 192.168.1.42:58783 fallback fd00::1234"
+        let redacted = AppLogger.redactedDiagnostic(raw)
+
+        XCTAssertFalse(redacted.contains("192.168.1.42"))
+        XCTAssertFalse(redacted.contains("fd00::1234"))
+    }
+
     private func plist(_ entries: [String: String]) -> String {
         let body = entries.sorted(by: { $0.key < $1.key }).map {
             "<key>\($0.key)</key>\($0.value)"

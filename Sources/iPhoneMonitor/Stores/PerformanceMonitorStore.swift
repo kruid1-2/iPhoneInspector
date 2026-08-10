@@ -53,7 +53,6 @@ final class PerformanceMonitorStore: ObservableObject {
     private var flushTask: Task<Void, Never>?
     private var elapsedTask: Task<Void, Never>?
     private var lifecycleShutdownTask: Task<Void, Never>?
-    private var startupRetryTask: Task<Void, Never>?
     private var timelineBuildTask: Task<Void, Never>?
     private var lagSummaryTask: Task<Void, Never>?
     private var pendingMessages: [PerformanceMessage] = []
@@ -99,7 +98,6 @@ final class PerformanceMonitorStore: ObservableObject {
         elapsedTask?.cancel()
         timelineBuildTask?.cancel()
         lagSummaryTask?.cancel()
-        startupRetryTask?.cancel()
     }
 
     var canStart: Bool {
@@ -136,41 +134,34 @@ final class PerformanceMonitorStore: ObservableObject {
 
     func startMonitoring() {
         guard canStart else { return }
+        AppLogger.performance.info("start button pressed state=\(self.state.rawValue, privacy: .public)")
         operationInFlight = true
         lastError = nil
         resetSessionData()
         let config = PerformanceMonitoringConfiguration(enableOSLog: oslogEnabled)
         Task { [weak self] in
             guard let self else { return }
-            await performStart(config: config, allowFreshTaskRetry: true)
+            await performStart(config: config)
         }
     }
 
-    private func performStart(
-        config: PerformanceMonitoringConfiguration,
-        allowFreshTaskRetry: Bool
-    ) async {
+    private func performStart(config: PerformanceMonitoringConfiguration) async {
         do {
             try await service.startMonitoring(config: config)
-        } catch let firstError as PerformanceMonitorServiceError {
-            if case .timedOut("helper_ready") = firstError, allowFreshTaskRetry {
-                warningBuffer.append("Helper 首次冷启动未就绪，已清理精确 PID 并进行一次新任务重试")
-                compatibilityWarnings = warningBuffer.elements
-                // A fresh main-actor task matches the empirically reliable
-                // second-button invocation, while keeping the UI operation
-                // disabled and allowing only one retry.
-                startupRetryTask = Task { [weak self] in
-                    try? await Task.sleep(nanoseconds: 3_000_000_000)
-                    guard let self, !Task.isCancelled else { return }
-                    await performStart(config: config, allowFreshTaskRetry: false)
-                }
-                return
-            }
-            lastError = firstError.localizedDescription
+            AppLogger.performance.info("start request reached monitoring state")
+        } catch let serviceError as PerformanceMonitorServiceError {
+            let diagnostic = AppLogger.redactedDiagnostic(serviceError.localizedDescription)
+            AppLogger.performance.error(
+                "start request failed state=\(self.state.rawValue, privacy: .public) error=\(diagnostic, privacy: .public)"
+            )
+            lastError = serviceError.localizedDescription
         } catch {
+            let diagnostic = AppLogger.redactedDiagnostic(error.localizedDescription)
+            AppLogger.performance.error(
+                "start request failed state=\(self.state.rawValue, privacy: .public) error=\(diagnostic, privacy: .public)"
+            )
             lastError = error.localizedDescription
         }
-        startupRetryTask = nil
         operationInFlight = false
     }
 
@@ -213,8 +204,6 @@ final class PerformanceMonitorStore: ObservableObject {
             return
         }
 
-        startupRetryTask?.cancel()
-        startupRetryTask = nil
         operationInFlight = true
         let task = Task { await service.shutdown() }
         lifecycleShutdownTask = task
