@@ -126,7 +126,12 @@ public final class PerformanceHelperProcess: PerformanceHelperProcessControlling
                 self?.inputHandle = nil
                 self?.process = nil
             }
+            AppLogger.performance.info(
+                "helper termination handler status=\(process.terminationStatus, privacy: .public)"
+            )
         }
+
+        AppLogger.performance.info("helper stdout/stderr readers installed")
 
         do {
             try child.run()
@@ -139,6 +144,7 @@ public final class PerformanceHelperProcess: PerformanceHelperProcessControlling
             }
             throw PerformanceHelperProcessError.launchFailed(error.localizedDescription)
         }
+        AppLogger.performance.info("helper Process launched pid=\(child.processIdentifier, privacy: .public)")
         continuation.yield(.started(pid: child.processIdentifier, location: location))
     }
 
@@ -166,6 +172,7 @@ public final class PerformanceHelperProcess: PerformanceHelperProcessControlling
         let owned: Process? = lock.withLock { process }
         guard let owned, owned.isRunning else { return }
         let pid = owned.processIdentifier
+        AppLogger.performance.info("terminating owned helper pid=\(pid, privacy: .public)")
         owned.terminate()
         DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 2) { [weak owned] in
             guard let owned, owned.isRunning, owned.processIdentifier == pid else { return }

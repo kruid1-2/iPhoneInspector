@@ -115,13 +115,13 @@ cleanup_signing_dir
 trap - EXIT
 
 open_app() {
-  /usr/bin/open -n "$APP_BUNDLE"
+  /usr/bin/open -n -a "$APP_BUNDLE"
 }
 
 verify_process() {
   local attempt
   for attempt in 1 2 3 4 5 6 7 8 9 10; do
-    if /usr/bin/pgrep -x "$PROCESS_NAME" >/dev/null; then
+    if /usr/bin/pgrep -f -x "$APP_BINARY" >/dev/null; then
       echo "$DISPLAY_NAME 已启动：$APP_BUNDLE"
       return 0
     fi

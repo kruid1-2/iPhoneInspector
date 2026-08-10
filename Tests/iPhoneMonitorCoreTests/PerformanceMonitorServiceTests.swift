@@ -190,6 +190,55 @@ final class PerformanceMonitorServiceTests: XCTestCase {
         }
     }
 
+    func testStartSessionWaitsForHelperReady() async throws {
+        let fake = FakePerformanceHelperProcess(emitHelperReady: false)
+        let service = PerformanceMonitorService(
+            locator: FixtureHelperLocator(),
+            processFactory: { fake },
+            helperReadyTimeout: 1
+        )
+
+        let start = Task {
+            try await service.startMonitoring(config: PerformanceMonitoringConfiguration())
+        }
+        try await waitUntil { fake.isRunning }
+        XCTAssertEqual(fake.commands, [])
+
+        fake.emitHelperReadyNow()
+        try await start.value
+        XCTAssertEqual(fake.commands, [.startSession])
+        try await service.stopMonitoring()
+    }
+
+    func testReadyTimeoutRequiresExplicitSecondStartAndDoesNotDuplicateHelper() async throws {
+        let first = FakePerformanceHelperProcess(emitHelperReady: false)
+        let second = FakePerformanceHelperProcess()
+        let factory = SequentialFakeProcessFactory([first, second])
+        let service = PerformanceMonitorService(
+            locator: FixtureHelperLocator(),
+            processFactory: { factory.make() },
+            helperReadyTimeout: 0.05
+        )
+
+        do {
+            try await service.startMonitoring(config: PerformanceMonitoringConfiguration())
+            XCTFail("first start should time out")
+        } catch {
+            let state = await service.state
+            XCTAssertEqual(state, .helperFailed)
+        }
+        try await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertEqual(factory.creationCount, 1)
+        XCTAssertEqual(first.ownedTerminationCount, 1)
+        XCTAssertFalse(first.isRunning)
+
+        try await service.startMonitoring(config: PerformanceMonitoringConfiguration())
+        XCTAssertEqual(factory.creationCount, 2)
+        XCTAssertTrue(second.isRunning)
+        try await service.stopMonitoring()
+        XCTAssertFalse(second.isRunning)
+    }
+
     func testStartSessionCommandErrorCleansOwnedProcess() async {
         let fake = FakePerformanceHelperProcess()
         fake.failStartSession = true
@@ -339,6 +388,15 @@ private final class FakePerformanceHelperProcess: PerformanceHelperProcessContro
     func emitStderr(_ line: String) { continuation.yield(.stderrLine(line)) }
     func emitStdoutClosed() { continuation.yield(.stdoutClosed) }
 
+    func emitHelperReadyNow() {
+        emit(type: "helper_ready", sessionID: nil, payload: [
+            "helper_version": "fixture",
+            "read_only": true,
+            "commands": ["start_session", "mark_lag", "stop_session", "shutdown"],
+            "event_types": ["helper_ready", "session_started", "lag_marker", "session_ended", "helper_shutdown"]
+        ], protocolVersion: helperProtocolVersion)
+    }
+
     func emit(
         type: String,
         sequence: Int? = nil,
@@ -377,5 +435,30 @@ private final class FakePerformanceHelperProcess: PerformanceHelperProcessContro
         lock.lock()
         defer { lock.unlock() }
         return body()
+    }
+}
+
+private final class SequentialFakeProcessFactory: @unchecked Sendable {
+    private let lock = NSLock()
+    private var processes: [FakePerformanceHelperProcess]
+    private var created = 0
+
+    init(_ processes: [FakePerformanceHelperProcess]) {
+        self.processes = processes
+    }
+
+    var creationCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return created
+    }
+
+    func make() -> FakePerformanceHelperProcess {
+        lock.lock()
+        defer { lock.unlock() }
+        precondition(created < processes.count, "fixture process factory exhausted")
+        let process = processes[created]
+        created += 1
+        return process
     }
 }
