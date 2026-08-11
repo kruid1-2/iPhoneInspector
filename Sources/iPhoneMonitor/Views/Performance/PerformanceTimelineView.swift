@@ -31,9 +31,9 @@ struct PerformanceTimelineView: View, Equatable {
     let onProcessFilterChange: (String, Bool) -> Void
     let onVisibilityChange: (Bool) -> Void
 
-    @State private var selectedMarkerID: String?
-    @State private var selectedMetricGroup: TimelineMetricGroup = .cpu
-    @State private var processSearch = ""
+    @SceneStorage("performance.timeline.marker") private var selectedMarkerID: String?
+    @SceneStorage("performance.timeline.metric") private var selectedMetricGroupRaw = TimelineMetricGroup.cpu.rawValue
+    @SceneStorage("performance.timeline.processSearch") private var processSearch = ""
 
     static func == (lhs: PerformanceTimelineView, rhs: PerformanceTimelineView) -> Bool {
         lhs.revision == rhs.revision && lhs.range == rhs.range
@@ -60,7 +60,10 @@ struct PerformanceTimelineView: View, Equatable {
                 }
             }
         }
-        .onAppear { onVisibilityChange(true) }
+        .onAppear {
+            onProcessFilterChange(processSearch, false)
+            onVisibilityChange(true)
+        }
         .onDisappear { onVisibilityChange(false) }
         .onChange(of: processSearch) { query in
             onProcessFilterChange(query, false)
@@ -96,7 +99,7 @@ struct PerformanceTimelineView: View, Equatable {
             }
 
             HStack(spacing: 10) {
-                Picker("指标", selection: $selectedMetricGroup) {
+                Picker("指标", selection: metricGroupBinding) {
                     ForEach(TimelineMetricGroup.allCases) { group in
                         Text(group.title).tag(group)
                     }
@@ -265,6 +268,17 @@ struct PerformanceTimelineView: View, Equatable {
                 xDomain: xDomain
             )
         }
+    }
+
+    private var selectedMetricGroup: TimelineMetricGroup {
+        TimelineMetricGroup(rawValue: selectedMetricGroupRaw) ?? .cpu
+    }
+
+    private var metricGroupBinding: Binding<TimelineMetricGroup> {
+        Binding(
+            get: { selectedMetricGroup },
+            set: { selectedMetricGroupRaw = $0.rawValue }
+        )
     }
 
     private func batteryCard(kind: TimelineSeriesKind, title: String) -> some View {

@@ -19,25 +19,63 @@ private enum PerformanceDetailTab: String, CaseIterable, Identifiable {
     }
 }
 
+private enum PerformancePage: String, CaseIterable, Identifiable {
+    case diagnosis
+    case details
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .diagnosis: return "诊断"
+        case .details: return "详细数据"
+        }
+    }
+}
+
 struct PerformanceMonitorView: View {
     @ObservedObject var store: PerformanceMonitorStore
     @ObservedObject var deviceStore: DeviceStore
 
     @State private var showMarkerSheet = false
     @State private var markerNote = ""
+    @State private var selectedPage: PerformancePage = .diagnosis
     @State private var selectedDetailTab: PerformanceDetailTab = .timeline
 
     private let columns = [GridItem(.adaptive(minimum: 300), spacing: 14)]
 
     var body: some View {
-        VSplitView {
-            upperStatusPane
-                .frame(minHeight: 220, idealHeight: 430)
+        VStack(spacing: 0) {
+            Picker("性能页面", selection: $selectedPage) {
+                ForEach(PerformancePage.allCases) { page in
+                    Text(page.title).tag(page)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 230)
+            .padding(.top, 14)
+            .padding(.bottom, 8)
 
-            detailPerformancePane
-                .frame(minHeight: 250, idealHeight: 320)
+            switch selectedPage {
+            case .diagnosis:
+                PerformanceDiagnosticView(
+                    store: store,
+                    deviceStore: deviceStore,
+                    onMarkLag: { store.markLag(note: "") }
+                )
+            case .details:
+                detailedPage
+            }
         }
         .navigationTitle("性能监控")
+        .onAppear { updateTimelineVisibility() }
+        .onDisappear {
+            store.setDiagnosisVisible(false)
+            store.setTimelineVisible(false)
+        }
+        .onChange(of: selectedPage) { _ in updateTimelineVisibility() }
+        .onChange(of: selectedDetailTab) { _ in updateTimelineVisibility() }
         .sheet(isPresented: $showMarkerSheet) {
             VStack(alignment: .leading, spacing: 16) {
                 Text("标记刚刚发生的卡顿")
@@ -59,6 +97,21 @@ struct PerformanceMonitorView: View {
             .padding(22)
             .frame(width: 460)
         }
+    }
+
+    private var detailedPage: some View {
+        VSplitView {
+            upperStatusPane
+                .frame(minHeight: 220, idealHeight: 430)
+
+            detailPerformancePane
+                .frame(minHeight: 250, idealHeight: 320)
+        }
+    }
+
+    private func updateTimelineVisibility() {
+        store.setDiagnosisVisible(selectedPage == .diagnosis)
+        store.setTimelineVisible(selectedPage == .details && selectedDetailTab == .timeline)
     }
 
     private var upperStatusPane: some View {
