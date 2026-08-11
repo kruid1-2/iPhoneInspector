@@ -1,0 +1,16 @@
+{
+  "CurrentCapacity": 73,
+  "IsCharging": false,
+  "ExternalConnected": true,
+  "FullyCharged": false,
+  "InstantAmperage": -415,
+  "Voltage": 3991,
+  "Temperature": 3125,
+  "CycleCount": 321,
+  "DesignCapacity": 2406,
+  "NominalChargeCapacity": 2180,
+  "PowerTelemetryData": {
+    "AccumulatedSystemEnergyConsumed": 123456,
+    "SystemLoadCurrent": -380
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "CPUCount": 6,
+  "EnabledCPUs": 6,
+  "CPU_TotalLoad": 101.25,
+  "CPU_SystemLoad": -1,
+  "CPU_UserLoad": -1,
+  "physMemSize": 4294967296,
+  "vmFreeCount": 12345,
+  "vmUsedCount": 54321,
+  "threadCount": 1820,
+  "netBytesIn": 1000,
+  "netBytesOut": 800
+}

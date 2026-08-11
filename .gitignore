@@ -1,7 +1,38 @@
 .build/
 dist/
 .DS_Store
-.performance-tools/
+# Keep local runtimes, wheel caches, captures, logs, and generated artifacts
+# ignored. Only the reviewed Helper source/test deliverables below are tracked.
+.performance-tools/*
+!.performance-tools/helper/
+
+.performance-tools/helper/*
+!.performance-tools/helper/README.md
+!.performance-tools/helper/requirements-lock.txt
+!.performance-tools/helper/run_helper.sh
+!.performance-tools/helper/test_helper.sh
+
+!.performance-tools/helper/performance_helper/
+.performance-tools/helper/performance_helper/*
+!.performance-tools/helper/performance_helper/*.py
+!.performance-tools/helper/performance_helper/providers/
+.performance-tools/helper/performance_helper/providers/*
+!.performance-tools/helper/performance_helper/providers/*.py
+
+!.performance-tools/helper/tests/
+.performance-tools/helper/tests/*
+!.performance-tools/helper/tests/*.py
+!.performance-tools/helper/tests/fixtures/
+.performance-tools/helper/tests/fixtures/*
+!.performance-tools/helper/tests/fixtures/*.json
+
+# Defense in depth for generated Python and runtime output.
+.performance-tools/**/__pycache__/
+.performance-tools/**/.pytest_cache/
+.performance-tools/**/*.pyc
+.performance-tools/**/*.pyo
+.performance-tools/**/*.log
+.performance-tools/**/*.jsonl
 
 # iPhone diagnostics can contain private metadata and must never be committed.
 diagnostics/
