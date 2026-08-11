@@ -69,6 +69,30 @@ final class PerformanceDiagnosticPresentationTests: XCTestCase {
         XCTAssertEqual(snapshot.energy, "数据不足")
     }
 
+    func testLiveSnapshotReportsPartialMemoryDataWhenFreeTrendIsInsufficient() {
+        let snapshot = PerformanceDiagnosticPresenter.liveSnapshot(
+            frame: frame(freeMemory: [100], compressor: [10, 10, 10]),
+            streamGapCount: 0,
+            providerErrorCount: 0,
+            droppedCount: 0
+        )
+
+        XCTAssertEqual(snapshot.memory, "内存数据部分不足")
+        XCTAssertEqual(snapshot.memoryExplanation, "内存压缩趋势基本稳定，但空闲空间数据不足。")
+    }
+
+    func testLiveSnapshotReportsPartialMemoryDataWhenCompressorTrendIsInsufficient() {
+        let snapshot = PerformanceDiagnosticPresenter.liveSnapshot(
+            frame: frame(freeMemory: [100, 100, 100], compressor: [10]),
+            streamGapCount: 0,
+            providerErrorCount: 0,
+            droppedCount: 0
+        )
+
+        XCTAssertEqual(snapshot.memory, "内存数据部分不足")
+        XCTAssertEqual(snapshot.memoryExplanation, "空闲空间基本稳定，但内存压缩趋势数据不足。")
+    }
+
     func testIncompleteLagOverviewLeadsWithLimitedReference() {
         let presentation = PerformanceDiagnosticPresenter.lagPresentation(
             summary: summary(
@@ -79,38 +103,95 @@ final class PerformanceDiagnosticPresentationTests: XCTestCase {
                 droppedCount: 3,
                 confidence: .incomplete
             ),
-            processDisplayNames: ["微信", "SpringBoard（系统界面）"]
+            processDisplayName: { $0 }
         )
 
-        XCTAssertTrue(presentation.overview.hasPrefix("卡顿附近存在数据中断或采集异常"))
+        XCTAssertEqual(presentation.confidence, .incomplete)
+        XCTAssertEqual(presentation.overview, "卡顿附近存在数据中断或采集异常，以下观察参考有限。")
         XCTAssertEqual(presentation.dataIntegrity, "不完整")
         XCTAssertTrue(presentation.dataIntegrityDetail.contains("1 次数据中断"))
         XCTAssertTrue(presentation.dataIntegrityDetail.contains("2 次数据源错误"))
         XCTAssertTrue(presentation.dataIntegrityDetail.contains("3 条队列丢弃"))
     }
 
+    func testGoodHighCPUAndMemoryGrowthKeepsMeasuredOverview() {
+        let presentation = PerformanceDiagnosticPresenter.lagPresentation(
+            summary: summary(
+                cpu: .high,
+                busiestProcesses: [
+                    process(identity: "100:WeChat:0", name: "WeChat", pid: 100, cpuRaw: 90),
+                    process(identity: "200:SpringBoard:0", name: "SpringBoard", pid: 200, cpuRaw: 70)
+                ],
+                memory: memory(growth: 40)
+            ),
+            processDisplayName: { name in
+                name == "WeChat" ? "微信" : "SpringBoard（系统界面）"
+            }
+        )
+
+        XCTAssertEqual(presentation.confidence, .good)
+        XCTAssertEqual(
+            presentation.overview,
+            "卡顿附近同时观察到较高的处理器活动和应用内存增长，微信、SpringBoard（系统界面）值得继续观察；这些现象只是在时间上接近，不能单独说明原因。"
+        )
+        XCTAssertEqual(
+            presentation.phenomena,
+            ["处理器活动处于最近一段时间的较高水平", "观察到应用内存增长"]
+        )
+        XCTAssertEqual(presentation.dataIntegrity, "良好")
+    }
+
     func testNeutralAndInsufficientLagSummariesStayMeasured() {
+        let neutralProcesses = [
+            process(identity: "100:WeChat:0", name: "微信", pid: 100, cpuRaw: 30),
+            process(identity: "200:SpringBoard:0", name: "SpringBoard（系统界面）", pid: 200, cpuRaw: 20),
+            process(identity: "300:Camera:0", name: "相机", pid: 300, cpuRaw: 10)
+        ]
         let neutral = PerformanceDiagnosticPresenter.lagPresentation(
             summary: summary(
                 cpu: .noClearIncrease,
+                busiestProcesses: neutralProcesses,
                 freeMemoryTrend: .stable,
                 compressorTrend: .stable,
                 batteryTemperatureTrend: .stable,
                 energy: .noClearChange
             ),
-            processDisplayNames: ["微信", "SpringBoard（系统界面）", "相机"]
+            processDisplayName: { $0 }
         )
         let insufficient = PerformanceDiagnosticPresenter.lagPresentation(
             summary: summary(),
-            processDisplayNames: []
+            processDisplayName: { $0 }
         )
 
         XCTAssertTrue(neutral.overview.contains("没有观察到单一、明确的同步变化"))
-        XCTAssertEqual(neutral.processDisplayNames, ["微信", "SpringBoard（系统界面）", "相机"])
+        XCTAssertEqual(neutral.relatedProcesses.map(\.displayName), ["微信", "SpringBoard（系统界面）", "相机"])
         XCTAssertEqual(neutral.dataIntegrity, "良好")
-        XCTAssertTrue(insufficient.overview.hasPrefix("现有数据不足"))
-        XCTAssertTrue(insufficient.phenomena.contains("用于比较的数据不足"))
-        XCTAssertTrue(insufficient.processDisplayNames.isEmpty)
+        XCTAssertEqual(insufficient.overview, "现有数据不足，暂时无法概括卡顿附近的变化；建议再次出现时继续标记。")
+        XCTAssertEqual(insufficient.phenomena, ["用于比较的数据不足"])
+        XCTAssertTrue(insufficient.relatedProcesses.isEmpty)
+        XCTAssertFalse(insufficient.overview.contains("没有观察到单一、明确的同步变化"))
+    }
+
+    func testLagPresentationPreservesDistinctProcessIdentitiesWhenDisplayNamesMatch() {
+        let presentation = PerformanceDiagnosticPresenter.lagPresentation(
+            summary: summary(
+                cpu: .high,
+                busiestProcesses: [
+                    process(identity: "101:com.tencent.xin:0", name: "com.tencent.xin", pid: 101, cpuRaw: 60),
+                    process(identity: "101:com.tencent.xin:1", name: "WeChat", pid: 101, cpuRaw: 55)
+                ]
+            ),
+            processDisplayName: { _ in "微信" }
+        )
+
+        XCTAssertEqual(
+            presentation.relatedProcesses.map(\.identity),
+            ["101:com.tencent.xin:0", "101:com.tencent.xin:1"]
+        )
+        XCTAssertEqual(presentation.relatedProcesses.map(\.displayName), ["微信", "微信"])
+        XCTAssertEqual(presentation.relatedProcesses.map(\.id), presentation.relatedProcesses.map(\.identity))
+        XCTAssertEqual(presentation.relatedProcesses.map(\.pid), [101, 101])
+        XCTAssertEqual(presentation.relatedProcesses.map(\.cpuRaw), [60, 55])
     }
 
     func testLagPhenomenaDescribeMemoryTemperatureAndEnergyWithoutCausalClaims() {
@@ -123,12 +204,27 @@ final class PerformanceDiagnosticPresentationTests: XCTestCase {
                 batteryTemperatureTrend: .increasing,
                 energy: .increased
             ),
-            processDisplayNames: ["微信", "SpringBoard（系统界面）"]
+            processDisplayName: { $0 == "WeChat" ? "微信" : $0 }
         )
         let allText = ([presentation.overview] + presentation.phenomena
-            + presentation.processDisplayNames + [presentation.dataIntegrity, presentation.dataIntegrityDetail])
+            + presentation.relatedProcesses.map(\.displayName)
+            + [
+                presentation.processor,
+                presentation.applicationMemory,
+                presentation.systemMemory,
+                presentation.batteryTemperature,
+                presentation.energy,
+                presentation.dataIntegrity,
+                presentation.dataIntegrityDetail
+            ])
             .joined(separator: " ")
 
+        XCTAssertEqual(presentation.processor, "卡顿附近的处理器负载与之前大致相近")
+        XCTAssertTrue(presentation.applicationMemory.contains("微信在分析窗口内增加约 40.0 MiB"))
+        XCTAssertTrue(presentation.systemMemory.contains("空闲内存页减少"))
+        XCTAssertTrue(presentation.systemMemory.contains("压缩内存页增加"))
+        XCTAssertEqual(presentation.batteryTemperature, "正在升温")
+        XCTAssertEqual(presentation.energy, "卡顿附近的能耗评分有所升高")
         XCTAssertTrue(presentation.phenomena.contains("观察到应用内存增长"))
         XCTAssertTrue(presentation.phenomena.contains("空闲内存减少，内存压缩增加"))
         XCTAssertTrue(presentation.phenomena.contains("电池温度正在升高"))
@@ -201,8 +297,18 @@ final class PerformanceDiagnosticPresentationTests: XCTestCase {
         )
     }
 
+    private func process(
+        identity: String,
+        name: String,
+        pid: Int?,
+        cpuRaw: Double
+    ) -> LagProcessObservation {
+        LagProcessObservation(identity: identity, name: name, pid: pid, cpuRaw: cpuRaw)
+    }
+
     private func summary(
         cpu: LagCPUObservation = .insufficientData,
+        busiestProcesses: [LagProcessObservation] = [],
         memory: LagMemoryObservation? = nil,
         freeMemoryTrend: PerformanceTrendDirection = .insufficientData,
         compressorTrend: PerformanceTrendDirection = .insufficientData,
@@ -220,7 +326,7 @@ final class PerformanceDiagnosticPresentationTests: XCTestCase {
             preWindowSeconds: 30,
             postWindowSeconds: 10,
             cpuObservation: cpu,
-            busiestProcesses: [],
+            busiestProcesses: busiestProcesses,
             appMemory: memory ?? self.memory(),
             freeMemoryTrend: freeMemoryTrend,
             compressorTrend: compressorTrend,

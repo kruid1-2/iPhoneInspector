@@ -14,10 +14,24 @@ public struct PerformanceDiagnosticSnapshot: Equatable, Sendable {
     }
 }
 
+public struct PerformanceLagProcessPresentation: Equatable, Sendable, Identifiable {
+    public var id: String { identity }
+    public let identity: String
+    public let displayName: String
+    public let pid: Int?
+    public let cpuRaw: Double
+}
+
 public struct PerformanceLagDiagnosticPresentation: Equatable, Sendable {
+    public let confidence: LagDataConfidence
     public let overview: String
     public let phenomena: [String]
-    public let processDisplayNames: [String]
+    public let relatedProcesses: [PerformanceLagProcessPresentation]
+    public let processor: String
+    public let applicationMemory: String
+    public let systemMemory: String
+    public let batteryTemperature: String
+    public let energy: String
     public let dataIntegrity: String
     public let dataIntegrityDetail: String
 }
@@ -82,15 +96,32 @@ public enum PerformanceDiagnosticPresenter {
 
     public static func lagPresentation(
         summary: PerformanceLagSummary,
-        processDisplayNames: [String]
+        processDisplayName: (String) -> String
     ) -> PerformanceLagDiagnosticPresentation {
-        let names = Array(processDisplayNames.prefix(3))
+        let relatedProcesses = summary.busiestProcesses.prefix(3).map { process in
+            PerformanceLagProcessPresentation(
+                identity: process.identity,
+                displayName: processDisplayName(process.name),
+                pid: process.pid,
+                cpuRaw: process.cpuRaw
+            )
+        }
+        let names = relatedProcesses.map(\.displayName)
         let phenomena = lagPhenomena(summary)
 
         return PerformanceLagDiagnosticPresentation(
+            confidence: summary.confidence,
             overview: lagOverview(summary, processDisplayNames: names),
             phenomena: phenomena,
-            processDisplayNames: names,
+            relatedProcesses: relatedProcesses,
+            processor: processorPresentation(summary.cpuObservation),
+            applicationMemory: applicationMemoryPresentation(
+                summary.appMemory,
+                processDisplayName: processDisplayName
+            ),
+            systemMemory: systemMemoryPresentation(summary),
+            batteryTemperature: batteryTemperaturePresentation(summary.batteryTemperatureTrend),
+            energy: energyPresentation(summary.energyObservation),
             dataIntegrity: summary.confidence == .good ? "良好" : "不完整",
             dataIntegrityDetail: dataIntegrityDetail(summary)
         )
@@ -129,6 +160,30 @@ public enum PerformanceDiagnosticPresenter {
         if free == .insufficientData, compressor == .insufficientData {
             return ("数据不足", "样本不足，暂时无法判断内存趋势。")
         }
+        if free == .insufficientData {
+            switch compressor {
+            case .increasing:
+                return ("压缩正在增加", "观察到内存压缩趋势正在增加，但空闲空间数据不足。")
+            case .decreasing:
+                return ("压缩正在减少", "观察到内存压缩趋势正在减少，但空闲空间数据不足。")
+            case .stable:
+                return ("内存数据部分不足", "内存压缩趋势基本稳定，但空闲空间数据不足。")
+            case .insufficientData:
+                break
+            }
+        }
+        if compressor == .insufficientData {
+            switch free {
+            case .increasing:
+                return ("空闲空间正在增加", "观察到空闲空间趋势正在增加，但内存压缩趋势数据不足。")
+            case .decreasing:
+                return ("空闲空间正在减少", "观察到空闲空间趋势正在减少，但内存压缩趋势数据不足。")
+            case .stable:
+                return ("内存数据部分不足", "空闲空间基本稳定，但内存压缩趋势数据不足。")
+            case .insufficientData:
+                break
+            }
+        }
         if free == .decreasing, compressor == .increasing {
             return ("内存使用正在变重", "观察到空闲空间减少，同时内存压缩增加。")
         }
@@ -139,6 +194,65 @@ public enum PerformanceDiagnosticPresenter {
             return ("空闲空间正在减少", "观察到空闲空间趋势正在减少。")
         }
         return ("基本稳定", "最近的内存趋势基本稳定。")
+    }
+
+    private static func processorPresentation(_ observation: LagCPUObservation) -> String {
+        switch observation {
+        case .high: return "卡顿附近的处理器负载处于最近一段时间的较高水平"
+        case .similar: return "卡顿附近的处理器负载与之前大致相近"
+        case .noClearIncrease: return "卡顿附近的处理器负载没有明显升高"
+        case .insufficientData: return "数据不足，无法比较卡顿前后的整体负载"
+        }
+    }
+
+    private static func applicationMemoryPresentation(
+        _ memory: LagMemoryObservation,
+        processDisplayName: (String) -> String
+    ) -> String {
+        var parts: [String] = []
+        if let name = memory.largestProcessName, let value = memory.largestMiB {
+            parts.append("\(processDisplayName(name))当时约 \(String(format: "%.1f", value)) MiB")
+        }
+        if let name = memory.fastestGrowthProcessName, let growth = memory.growthMiB {
+            parts.append("\(processDisplayName(name))在分析窗口内增加约 \(String(format: "%.1f", growth)) MiB")
+        }
+        return parts.isEmpty ? "应用内存数据不足" : parts.joined(separator: "；")
+    }
+
+    private static func systemMemoryPresentation(_ summary: PerformanceLagSummary) -> String {
+        let free = trendText(
+            summary.freeMemoryTrend,
+            increasing: "空闲内存页增加",
+            stable: "空闲内存页基本稳定",
+            decreasing: "空闲内存页减少"
+        )
+        let compressed = trendText(
+            summary.compressorTrend,
+            increasing: "压缩内存页增加",
+            stable: "压缩内存页基本稳定",
+            decreasing: "压缩内存页减少"
+        )
+        if free == "数据不足", compressed == "数据不足" {
+            return "系统内存趋势数据不足"
+        }
+        return "\(free)；\(compressed)。这里只观察趋势，不代表已经发生内存不足"
+    }
+
+    private static func batteryTemperaturePresentation(_ trend: PerformanceTrendDirection) -> String {
+        trendText(
+            trend,
+            increasing: "正在升温",
+            stable: "基本稳定",
+            decreasing: "正在降温"
+        )
+    }
+
+    private static func energyPresentation(_ observation: LagEnergyObservation) -> String {
+        switch observation {
+        case .increased: return "卡顿附近的能耗评分有所升高"
+        case .noClearChange: return "卡顿附近的能耗变化不明显"
+        case .insufficientData: return "能耗数据不足"
+        }
     }
 
     private static func lagOverview(
@@ -236,7 +350,10 @@ public enum PerformanceDiagnosticPresenter {
 
         var details: [String] = []
         if summary.streamGapCount > 0 {
-            details.append("\(summary.streamGapCount) 次数据中断")
+            let duration = summary.streamGapSeconds > 0
+                ? String(format: "约 %.1f 秒", summary.streamGapSeconds)
+                : "时长未知"
+            details.append("\(summary.streamGapCount) 次数据中断（\(duration)）")
         }
         if summary.providerErrorCount > 0 {
             details.append("\(summary.providerErrorCount) 次数据源错误")

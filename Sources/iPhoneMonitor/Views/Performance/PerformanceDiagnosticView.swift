@@ -126,13 +126,13 @@ struct PerformanceDiagnosticView: View {
                 }
 
                 SectionCard("可能相关进程") {
-                    if presentation.processDisplayNames.isEmpty {
+                    if presentation.relatedProcesses.isEmpty {
                         Text("进程数据不足，暂不列出相关进程。")
                             .foregroundStyle(.secondary)
                     } else {
                         VStack(alignment: .leading, spacing: 8) {
-                            ForEach(presentation.processDisplayNames, id: \.self) { name in
-                                Label(name, systemImage: "app.dashed")
+                            ForEach(presentation.relatedProcesses) { process in
+                                Label(process.displayName, systemImage: "app.dashed")
                             }
                             Text("这些进程只是在卡顿附近的活动中被观察到，不能单独说明原因。")
                                 .font(.caption)
@@ -165,7 +165,7 @@ struct PerformanceDiagnosticView: View {
     private func lagPresentation(_ summary: PerformanceLagSummary) -> PerformanceLagDiagnosticPresentation {
         PerformanceDiagnosticPresenter.lagPresentation(
             summary: summary,
-            processDisplayNames: summary.busiestProcesses.map { AppNameResolver.displayName(for: $0.name) }
+            processDisplayName: { AppNameResolver.displayName(for: $0) }
         )
     }
 
