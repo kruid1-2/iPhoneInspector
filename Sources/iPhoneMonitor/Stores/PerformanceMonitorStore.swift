@@ -17,7 +17,6 @@ final class PerformanceMonitorStore: ObservableObject {
 
     @Published private(set) var state: PerformanceSessionState = .idle
     @Published private(set) var helperPID: Int32?
-    @Published private(set) var helperSource: PerformanceHelperLocation.Source?
     private(set) var capability: PerformanceCapability?
     private(set) var lastUpdate: Date?
     private(set) var sessionStartedAt: Date?
@@ -255,8 +254,8 @@ final class PerformanceMonitorStore: ObservableObject {
                 elapsedTask?.cancel()
                 elapsedTask = nil
             }
-        case .helperLocated(let source):
-            helperSource = source
+        case .helperLocated:
+            break
         case .helperStarted(let pid):
             helperPID = pid
         case .message(let message):
