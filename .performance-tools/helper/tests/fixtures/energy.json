@@ -1,0 +1,10 @@
+{
+  "55": {
+    "energy.cost": 12.5,
+    "energy.cpu.cost": 8.0,
+    "energy.gpu.cost": 0.25,
+    "energy.networking.cost": 1.5,
+    "energy.thermalstate.cost": 0,
+    "kIDEGaugeSecondsSinceInitialQueryKey": 4.0
+  }
+}

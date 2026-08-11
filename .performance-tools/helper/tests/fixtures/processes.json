@@ -1,0 +1,45 @@
+[
+  {
+    "pid": 55,
+    "ppid": 1,
+    "name": "SpringBoard",
+    "cpuUsage": 2.5,
+    "physFootprint": 281430472,
+    "memResidentSize": 240000000,
+    "memVirtualSize": 8000000000,
+    "procStatus": 2,
+    "threadCount": 48,
+    "diskBytesRead": 4096,
+    "diskBytesWritten": 2048,
+    "startAbsTime": 1000000
+  },
+  {
+    "pid": 88,
+    "ppid": 1,
+    "name": "backboardd",
+    "cpuUsage": 7.2,
+    "physFootprint": 253691328,
+    "memResidentSize": 220000000,
+    "threadCount": 33,
+    "diskBytesRead": 2048,
+    "diskBytesWritten": 1024
+  },
+  {
+    "pid": 99,
+    "ppid": 1,
+    "name": "DTServiceHub",
+    "cpuUsage": 26.0,
+    "physFootprint": 32000000,
+    "memResidentSize": 30000000,
+    "threadCount": 12
+  },
+  {
+    "pid": 140,
+    "ppid": 1,
+    "name": "ExampleApp",
+    "cpuUsage": 0.4,
+    "physFootprint": 859900000,
+    "memResidentSize": 700000000,
+    "threadCount": 24
+  }
+]
