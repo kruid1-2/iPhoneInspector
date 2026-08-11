@@ -156,19 +156,29 @@ final class PerformanceMonitorStore: ObservableObject {
             try await service.startMonitoring(config: config)
             AppLogger.performance.info("start request reached monitoring state")
         } catch let serviceError as PerformanceMonitorServiceError {
-            let diagnostic = AppLogger.redactedDiagnostic(serviceError.localizedDescription)
-            AppLogger.performance.error(
-                "start request failed state=\(self.state.rawValue, privacy: .public) error=\(diagnostic, privacy: .public)"
-            )
-            lastError = serviceError.localizedDescription
+            await presentStartupFailure(serviceError)
         } catch {
-            let diagnostic = AppLogger.redactedDiagnostic(error.localizedDescription)
-            AppLogger.performance.error(
-                "start request failed state=\(self.state.rawValue, privacy: .public) error=\(diagnostic, privacy: .public)"
-            )
-            lastError = error.localizedDescription
+            await presentStartupFailure(error)
         }
         operationInFlight = false
+    }
+
+    private func presentStartupFailure(_ error: Error) async {
+        let diagnostic = AppLogger.redactedDiagnostic(error.localizedDescription)
+        let location = await service.lastHelperLocation
+        let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+        let documentsAccessMayBeRelevant = PerformanceStartupFailurePresenter.documentsAccessMayBeRelevant(
+            for: location,
+            documentDirectoryURL: documentsURL
+        )
+        let presentation = PerformanceStartupFailurePresenter.presentation(
+            for: error,
+            documentsAccessMayBeRelevant: documentsAccessMayBeRelevant
+        )
+        AppLogger.performance.error(
+            "start request failed state=\(self.state.rawValue, privacy: .public) kind=\(presentation.kind.rawValue, privacy: .public) error=\(diagnostic, privacy: .public)"
+        )
+        lastError = presentation.userMessage
     }
 
     func stopMonitoring() {
@@ -336,12 +346,16 @@ final class PerformanceMonitorStore: ObservableObject {
                     gapsChanged = true
                     receivedTimelineData = true
                 }
-            case .providerError, .commandError:
+            case .providerError:
                 if let error = PerformanceProviderError(message: message) {
                     errorBuffer.append(error)
                     errorsChanged = true
                     lastError = "\(error.provider)：\(error.summary)"
                 }
+            case .commandError:
+                // PerformanceMonitorService records the redacted diagnostic and
+                // the startup presenter owns the concise user-facing failure.
+                break
             case .userMarker:
                 if let marker = PerformanceUserMarker(message: message) {
                     markerBuffer.append(marker)
