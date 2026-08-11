@@ -3,6 +3,8 @@ import Foundation
 public enum PerformanceMonitorServiceError: LocalizedError, Equatable, Sendable {
     case invalidTransition(from: PerformanceSessionState, action: String)
     case timedOut(String)
+    case helperLocation(PerformanceHelperLocatorError)
+    case helperProcess(PerformanceHelperProcessError)
     case helperError(String)
     case processExited(Int32)
 
@@ -12,6 +14,10 @@ public enum PerformanceMonitorServiceError: LocalizedError, Equatable, Sendable 
             return "当前状态 \(state.label) 不允许执行 \(action)"
         case .timedOut(let action):
             return "等待 \(action) 超时"
+        case .helperLocation(let error):
+            return error.localizedDescription
+        case .helperProcess(let error):
+            return error.localizedDescription
         case .helperError(let detail):
             return detail
         case .processExited(let status):
@@ -36,6 +42,7 @@ public actor PerformanceMonitorService {
     public private(set) var state: PerformanceSessionState = .idle
     public private(set) var activeSessionID: String?
     public private(set) var helperPID: Int32?
+    public private(set) var lastHelperLocation: PerformanceHelperLocation?
 
     private let continuation: AsyncStream<PerformanceMonitorServiceEvent>.Continuation
     private let locator: any PerformanceHelperLocating
@@ -102,6 +109,9 @@ public actor PerformanceMonitorService {
             )
             sessionStartCommandNS = DispatchTime.now().uptimeNanoseconds
             AppLogger.performance.info("start_session sent")
+        } catch let error as PerformanceHelperProcessError {
+            await abnormalCleanup(reason: "start_session 写入失败：\(error.localizedDescription)")
+            throw PerformanceMonitorServiceError.helperProcess(error)
         } catch {
             await abnormalCleanup(reason: "start_session 写入失败：\(error.localizedDescription)")
             throw PerformanceMonitorServiceError.helperError(error.localizedDescription)
@@ -179,16 +189,22 @@ public actor PerformanceMonitorService {
 
     private func startHelper() async throws {
         helperLaunchStartedNS = DispatchTime.now().uptimeNanoseconds
+        lastHelperLocation = nil
         AppLogger.performance.info("helper launch requested")
         setState(.locatingHelper)
         let location: PerformanceHelperLocation
         do {
             location = try locator.locate()
+        } catch let error as PerformanceHelperLocatorError {
+            latestError = .helperLocation(error)
+            setState(.helperFailed)
+            throw latestError!
         } catch {
             latestError = .helperError(error.localizedDescription)
             setState(.helperFailed)
             throw latestError!
         }
+        lastHelperLocation = location
         continuation.yield(.helperLocated(location.source))
         AppLogger.performance.info("helper located source=\(location.source.rawValue, privacy: .public)")
 
@@ -211,6 +227,13 @@ public actor PerformanceMonitorService {
         do {
             try process.start(at: location, arguments: processArguments)
             AppLogger.performance.info("helper Process.run returned successfully")
+        } catch let error as PerformanceHelperProcessError {
+            helperProcess = nil
+            processTask?.cancel()
+            processTask = nil
+            latestError = .helperProcess(error)
+            setState(.helperFailed)
+            throw latestError!
         } catch {
             helperProcess = nil
             processTask?.cancel()

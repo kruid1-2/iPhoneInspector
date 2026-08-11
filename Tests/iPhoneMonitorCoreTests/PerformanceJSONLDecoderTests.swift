@@ -193,6 +193,19 @@ final class PerformanceJSONLDecoderTests: XCTestCase {
         XCTAssertEqual(error.provider, "energy")
     }
 
+    func testCommandErrorIsNotPresentedAsProviderError() throws {
+        let message = try decodedMessage(line(
+            type: "command_error",
+            source: "helper",
+            payload: [
+                "error_type": "FixtureError",
+                "error": "RSD fixture detail that belongs in diagnostics"
+            ]
+        ))
+
+        XCTAssertNil(PerformanceProviderError(message: message))
+    }
+
     func testHeartbeatDecodesProviderAndBoundedQueueState() throws {
         let payload: [String: Any] = [
             "provider_states": ["sysmon": "running", "energy": "waiting_for_processes"],
