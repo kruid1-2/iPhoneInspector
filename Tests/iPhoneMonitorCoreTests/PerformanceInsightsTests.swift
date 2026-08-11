@@ -69,6 +69,144 @@ final class PerformanceInsightsTests: XCTestCase {
         XCTAssertEqual(summary.streamGapSeconds, 3, accuracy: 0.001)
         XCTAssertEqual(summary.providerErrorCount, 1)
         XCTAssertEqual(summary.droppedCount, 2)
+        XCTAssertEqual(summary.integrityIssues.map(\.kind), [.streamGap, .providerError, .droppedMessage])
+        XCTAssertEqual(
+            summary.integrityIssues.map(\.scope),
+            [.analysisDependencyWindow, .monitoringSession, .monitoringSession]
+        )
+    }
+
+    func testGapInCPUBaselineOutsideLagObservationLowersConfidence() throws {
+        let marker = try marker(offset: 120)
+        let input = makeInput(
+            system: try (1...130).map { try system(offset: $0, cpu: 10) },
+            gaps: [try gap(offset: 60)],
+            markers: [marker]
+        )
+
+        let summary = PerformanceInsightAnalyzer.lagSummary(
+            input: input, marker: marker, providerErrorCount: 0, droppedCount: 0
+        )
+
+        XCTAssertEqual(summary.streamGapCount, 1)
+        XCTAssertEqual(summary.confidence, .incomplete)
+        let issue = try XCTUnwrap(summary.integrityIssues.first)
+        XCTAssertEqual(issue.kind, .streamGap)
+        XCTAssertEqual(issue.scope, .analysisDependencyWindow)
+        XCTAssertEqual(issue.count, 1)
+        XCTAssertEqual(try XCTUnwrap(issue.durationSeconds), 3, accuracy: 0.001)
+    }
+
+    func testGapBeforeAllAnalysisDependenciesDoesNotLowerConfidence() throws {
+        let marker = try marker(offset: 180)
+        let input = makeInput(
+            system: try (1...190).map { try system(offset: $0, cpu: 10) },
+            gaps: [try gap(offset: 30)],
+            markers: [marker]
+        )
+
+        let summary = PerformanceInsightAnalyzer.lagSummary(
+            input: input, marker: marker, providerErrorCount: 0, droppedCount: 0
+        )
+
+        XCTAssertEqual(summary.streamGapCount, 0)
+        XCTAssertEqual(summary.confidence, .good)
+        XCTAssertTrue(summary.integrityIssues.isEmpty)
+    }
+
+    func testGapInsideLagPreWindowStillLowersConfidence() throws {
+        let marker = try marker(offset: 120)
+        let input = makeInput(
+            system: try (1...130).map { try system(offset: $0, cpu: 10) },
+            gaps: [try gap(offset: 100)],
+            markers: [marker]
+        )
+
+        let summary = PerformanceInsightAnalyzer.lagSummary(
+            input: input, marker: marker, providerErrorCount: 0, droppedCount: 0
+        )
+
+        XCTAssertEqual(summary.streamGapCount, 1)
+        XCTAssertEqual(summary.confidence, .incomplete)
+        XCTAssertEqual(summary.integrityIssues.first?.scope, .analysisDependencyWindow)
+    }
+
+    func testGapInsideLagPostWindowStillLowersConfidence() throws {
+        let marker = try marker(offset: 120)
+        let input = makeInput(
+            system: try (1...130).map { try system(offset: $0, cpu: 10) },
+            gaps: [try gap(offset: 125)],
+            markers: [marker]
+        )
+
+        let summary = PerformanceInsightAnalyzer.lagSummary(
+            input: input, marker: marker, providerErrorCount: 0, droppedCount: 0
+        )
+
+        XCTAssertEqual(summary.streamGapCount, 1)
+        XCTAssertEqual(summary.confidence, .incomplete)
+        XCTAssertEqual(summary.integrityIssues.first?.scope, .analysisDependencyWindow)
+    }
+
+    func testGapReportedAfterDependencyWindowButSpanningItLowersConfidence() throws {
+        let marker = try marker(offset: 120)
+        let input = makeInput(
+            system: try (1...130).map { try system(offset: $0, cpu: 10) },
+            gaps: [try gap(offset: 132, observedGapMS: 3_000)],
+            markers: [marker]
+        )
+
+        let summary = PerformanceInsightAnalyzer.lagSummary(
+            input: input, marker: marker, providerErrorCount: 0, droppedCount: 0
+        )
+
+        XCTAssertEqual(summary.streamGapCount, 1)
+        XCTAssertEqual(summary.confidence, .incomplete)
+        XCTAssertEqual(summary.integrityIssues.first?.scope, .analysisDependencyWindow)
+    }
+
+    func testGapEndingAtDependencyLowerBoundaryDoesNotLowerConfidence() throws {
+        let marker = try marker(offset: 180)
+        let input = makeInput(
+            system: try (1...190).map { try system(offset: $0, cpu: 10) },
+            gaps: [try gap(offset: 60, observedGapMS: 3_000)],
+            markers: [marker]
+        )
+
+        let summary = PerformanceInsightAnalyzer.lagSummary(
+            input: input, marker: marker, providerErrorCount: 0, droppedCount: 0
+        )
+
+        XCTAssertEqual(summary.streamGapCount, 0)
+        XCTAssertEqual(summary.confidence, .good)
+        XCTAssertTrue(summary.integrityIssues.isEmpty)
+    }
+
+    func testUnknownGapDurationUsesPointTimeAndKeepsTypedDurationUnknown() throws {
+        let marker = try marker(offset: 120)
+        let input = makeInput(
+            system: try (1...130).map { try system(offset: $0, cpu: 10) },
+            gaps: [try gap(offset: 100, observedGapMS: nil)],
+            markers: [marker]
+        )
+
+        let summary = PerformanceInsightAnalyzer.lagSummary(
+            input: input, marker: marker, providerErrorCount: 0, droppedCount: 0
+        )
+
+        XCTAssertEqual(summary.streamGapCount, 1)
+        XCTAssertEqual(summary.confidence, .incomplete)
+        XCTAssertNil(summary.integrityIssues.first?.durationSeconds)
+    }
+
+    func testNoGapErrorOrDropKeepsGoodConfidence() throws {
+        let summary = try richSummary()
+
+        XCTAssertEqual(summary.streamGapCount, 0)
+        XCTAssertEqual(summary.providerErrorCount, 0)
+        XCTAssertEqual(summary.droppedCount, 0)
+        XCTAssertEqual(summary.confidence, .good)
+        XCTAssertTrue(summary.integrityIssues.isEmpty)
     }
 
     func testInsufficientDataDoesNotFabricateResults() throws {
@@ -247,12 +385,14 @@ final class PerformanceInsightsTests: XCTestCase {
         )))
     }
 
-    private func gap(offset: Int) throws -> PerformanceStreamGap {
-        try XCTUnwrap(PerformanceStreamGap(message: message(
+    private func gap(offset: Int, observedGapMS: Double? = 3_000) throws -> PerformanceStreamGap {
+        var payload: [String: Any] = ["provider": "sysmon", "stream": "system_sample"]
+        if let observedGapMS { payload["observed_gap_ms"] = observedGapMS }
+        return try XCTUnwrap(PerformanceStreamGap(message: message(
             type: "stream_gap",
             offset: offset,
             source: "sysmon",
-            payload: ["provider": "sysmon", "stream": "system_sample", "observed_gap_ms": 3_000]
+            payload: payload
         )))
     }
 
