@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import iPhoneMonitorCore
 
@@ -46,7 +47,7 @@ struct PerformanceMonitorView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Picker("性能页面", selection: $selectedPage) {
+            Picker("性能页面", selection: pageSelection) {
                 ForEach(PerformancePage.allCases) { page in
                     Text(page.title).tag(page)
                 }
@@ -112,6 +113,30 @@ struct PerformanceMonitorView: View {
         store.setDiagnosisVisible(selectedPage == .diagnosis)
     }
 
+    private var pageSelection: Binding<PerformancePage> {
+        Binding(
+            get: { selectedPage },
+            set: { page in
+                commitActiveTextEditing()
+                selectedPage = page
+            }
+        )
+    }
+
+    private var detailTabSelection: Binding<PerformanceDetailTab> {
+        Binding(
+            get: { selectedDetailTab },
+            set: { tab in
+                commitActiveTextEditing()
+                selectedDetailTab = tab
+            }
+        )
+    }
+
+    private func commitActiveTextEditing() {
+        NSApp.keyWindow?.makeFirstResponder(nil)
+    }
+
     private var upperStatusPane: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -140,7 +165,7 @@ struct PerformanceMonitorView: View {
 
     private var detailPerformancePane: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Picker("详细性能区域", selection: $selectedDetailTab) {
+            Picker("详细性能区域", selection: detailTabSelection) {
                 ForEach(PerformanceDetailTab.allCases) { tab in
                     Text(tab.title).tag(tab)
                 }
