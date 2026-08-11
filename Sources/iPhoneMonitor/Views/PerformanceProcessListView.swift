@@ -11,16 +11,16 @@ struct PerformanceProcessListView: View {
     }
 
     let processes: [ProcessPerformanceSample]
-    @State private var searchText = ""
-    @State private var sortMode: SortMode = .cpu
-    @State private var highLoadOnly = false
+    @SceneStorage("performance.processes.search") private var searchText = ""
+    @SceneStorage("performance.processes.sort") private var sortModeRaw = SortMode.cpu.rawValue
+    @SceneStorage("performance.processes.highLoadOnly") private var highLoadOnly = false
     @State private var displayedProcesses: [ProcessPerformanceSample] = []
     @State private var filterTask: Task<Void, Never>?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Picker("排序", selection: $sortMode) {
+                Picker("排序", selection: sortModeBinding) {
                     ForEach(SortMode.allCases) { mode in
                         Text(mode.title).tag(mode)
                     }
@@ -118,5 +118,16 @@ struct PerformanceProcessListView: View {
             guard !Task.isCancelled else { return }
             displayedProcesses = result
         }
+    }
+
+    private var sortMode: SortMode {
+        SortMode(rawValue: sortModeRaw) ?? .cpu
+    }
+
+    private var sortModeBinding: Binding<SortMode> {
+        Binding(
+            get: { sortMode },
+            set: { sortModeRaw = $0.rawValue }
+        )
     }
 }

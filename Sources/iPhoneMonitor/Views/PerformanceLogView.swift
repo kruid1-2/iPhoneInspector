@@ -3,9 +3,9 @@ import iPhoneMonitorCore
 
 struct PerformanceLogView: View {
     @ObservedObject var store: PerformanceMonitorStore
-    @State private var searchText = ""
-    @State private var minimumLevel = "全部"
-    @State private var pauseAutoScroll = false
+    @SceneStorage("performance.logs.search") private var searchText = ""
+    @SceneStorage("performance.logs.minimumLevel") private var minimumLevel = "全部"
+    @SceneStorage("performance.logs.pauseAutoScroll") private var pauseAutoScroll = false
 
     private let levels = ["全部", "debug", "info", "default", "error", "fault"]
 

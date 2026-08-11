@@ -57,6 +57,7 @@ final class PerformanceMonitorStore: ObservableObject {
     private var lagSummaryTask: Task<Void, Never>?
     private var pendingMessages: [PerformanceMessage] = []
     private var timelineVisible = false
+    private var diagnosisVisible = false
     private var timelineBuildGeneration: UInt64 = 0
     private var timelineDirty = false
     private var activeTimelineSessionID: String?
@@ -112,6 +113,11 @@ final class PerformanceMonitorStore: ObservableObject {
 
     func setTimelineVisible(_ visible: Bool) {
         timelineVisible = visible
+        if visible { scheduleTimelineBuild(force: true) }
+    }
+
+    func setDiagnosisVisible(_ visible: Bool) {
+        diagnosisVisible = visible
         if visible { scheduleTimelineBuild(force: true) }
     }
 
@@ -383,7 +389,7 @@ final class PerformanceMonitorStore: ObservableObject {
     }
 
     private func scheduleTimelineBuild(force: Bool = false) {
-        guard timelineVisible, force || timelineDirty,
+        guard (timelineVisible || diagnosisVisible), force || timelineDirty,
               let sessionID = activeTimelineSessionID,
               let startMonotonic = sessionStartMonotonicNS
         else { return }
