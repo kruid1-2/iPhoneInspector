@@ -4,31 +4,10 @@ import iPhoneMonitorCore
 
 @MainActor
 final class DeviceStore: ObservableObject {
-    enum OverallState: Equatable {
-        case idle
-        case connecting
-        case noDevice
-        case connected
-        case toolUnavailable
-        case readFailed
-
-        var label: String {
-            switch self {
-            case .idle: return "尚未检测"
-            case .connecting: return "正在检测设备"
-            case .noDevice: return "未连接设备"
-            case .connected: return "已连接"
-            case .toolUnavailable: return "工具不可用"
-            case .readFailed: return "读取失败"
-            }
-        }
-    }
-
     @Published private(set) var devices: [ConnectedDevice] = []
     @Published private(set) var providerStatuses: [DeviceProviderStatus] = []
     @Published private(set) var battery = BatteryInformation()
     @Published private(set) var storage = StorageInformation()
-    @Published private(set) var overallState: OverallState = .idle
     @Published private(set) var statusMessage = "等待首次设备检测…"
     @Published private(set) var lastRefresh: Date?
     @Published private(set) var isRefreshing = false
@@ -66,14 +45,12 @@ final class DeviceStore: ObservableObject {
             devices = [DemoDataFactory.device]
             battery = DemoDataFactory.battery
             storage = DemoDataFactory.storage
-            overallState = .connected
             statusMessage = "演示模式：当前显示的不是设备实测数据"
             lastRefresh = Date()
         } else {
             devices = []
             battery = BatteryInformation()
             storage = StorageInformation()
-            overallState = .idle
             statusMessage = "演示模式已关闭，等待真实设备检测…"
             requestRefresh(detailed: true)
         }
@@ -113,7 +90,6 @@ final class DeviceStore: ObservableObject {
     func refresh(detailed: Bool) async {
         guard !isRefreshing, !demoMode else { return }
         isRefreshing = true
-        overallState = .connecting
         statusMessage = "正在通过本地设备工具检查 iPhone…"
         defer { isRefreshing = false }
 
@@ -125,7 +101,6 @@ final class DeviceStore: ObservableObject {
 
         if !result.devices.isEmpty {
             devices = result.devices
-            overallState = .connected
             if let device = primaryDevice {
                 statusMessage = "\(device.displayName) · \(device.connectionState.label)"
                 AppLogger.device.info(
@@ -162,13 +137,9 @@ final class DeviceStore: ObservableObject {
 
         let availableProviders = result.providers.filter(\.available)
         if availableProviders.isEmpty {
-            overallState = .toolUnavailable
             statusMessage = "当前电脑没有可用的 iPhone 设备读取工具"
         } else if availableProviders.allSatisfy({ !$0.succeeded }) {
-            overallState = .readFailed
             statusMessage = "设备工具可用，但本次读取失败"
-        } else {
-            overallState = .noDevice
         }
     }
 
