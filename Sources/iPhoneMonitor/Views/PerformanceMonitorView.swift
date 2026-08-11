@@ -69,13 +69,12 @@ struct PerformanceMonitorView: View {
             }
         }
         .navigationTitle("性能监控")
-        .onAppear { updateTimelineVisibility() }
+        .onAppear { updateDiagnosisVisibility() }
         .onDisappear {
             store.setDiagnosisVisible(false)
             store.setTimelineVisible(false)
         }
-        .onChange(of: selectedPage) { _ in updateTimelineVisibility() }
-        .onChange(of: selectedDetailTab) { _ in updateTimelineVisibility() }
+        .onChange(of: selectedPage) { _ in updateDiagnosisVisibility() }
         .sheet(isPresented: $showMarkerSheet) {
             VStack(alignment: .leading, spacing: 16) {
                 Text("标记刚刚发生的卡顿")
@@ -109,9 +108,8 @@ struct PerformanceMonitorView: View {
         }
     }
 
-    private func updateTimelineVisibility() {
+    private func updateDiagnosisVisibility() {
         store.setDiagnosisVisible(selectedPage == .diagnosis)
-        store.setTimelineVisible(selectedPage == .details && selectedDetailTab == .timeline)
     }
 
     private var upperStatusPane: some View {
@@ -171,7 +169,11 @@ struct PerformanceMonitorView: View {
                 range: store.timelineRange,
                 onRangeChange: store.setTimelineRange,
                 onProcessFilterChange: store.setTimelineProcessFilter,
-                onVisibilityChange: store.setTimelineVisible
+                onVisibilityChange: { visible in
+                    store.setTimelineVisible(
+                        visible && selectedPage == .details && selectedDetailTab == .timeline
+                    )
+                }
             )
             .equatable()
         case .processes:
