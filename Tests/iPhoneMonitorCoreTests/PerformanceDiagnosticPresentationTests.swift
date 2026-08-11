@@ -107,11 +107,65 @@ final class PerformanceDiagnosticPresentationTests: XCTestCase {
         )
 
         XCTAssertEqual(presentation.confidence, .incomplete)
-        XCTAssertEqual(presentation.overview, "卡顿附近存在数据中断或采集异常，以下观察参考有限。")
+        XCTAssertTrue(presentation.overview.contains("卡顿分析依赖范围"))
+        XCTAssertTrue(presentation.overview.contains("本次监控会话"))
+        XCTAssertFalse(presentation.overview.contains("卡顿附近存在"))
         XCTAssertEqual(presentation.dataIntegrity, "不完整")
         XCTAssertTrue(presentation.dataIntegrityDetail.contains("1 次数据中断"))
-        XCTAssertTrue(presentation.dataIntegrityDetail.contains("2 次数据源错误"))
-        XCTAssertTrue(presentation.dataIntegrityDetail.contains("3 条队列丢弃"))
+        XCTAssertTrue(presentation.dataIntegrityDetail.contains("2 次采集组件异常"))
+        XCTAssertTrue(presentation.dataIntegrityDetail.contains("3 条采集消息丢弃"))
+        XCTAssertEqual(presentation.integrityIssues.map(\.kind), [.streamGap, .providerError, .droppedMessage])
+        XCTAssertEqual(
+            presentation.integrityIssues.map(\.scope),
+            [.analysisDependencyWindow, .monitoringSession, .monitoringSession]
+        )
+    }
+
+    func testProviderErrorsUseSessionScopeAndUnknownTiming() {
+        let presentation = PerformanceDiagnosticPresenter.lagPresentation(
+            summary: summary(providerErrorCount: 2, confidence: .incomplete),
+            processDisplayName: { $0 }
+        )
+
+        XCTAssertTrue(presentation.dataIntegrityDetail.contains("本次监控会话"))
+        XCTAssertTrue(presentation.dataIntegrityDetail.contains("2 次采集组件异常"))
+        XCTAssertTrue(presentation.dataIntegrityDetail.contains("发生时间无法确认"))
+        XCTAssertFalse(presentation.overview.contains("卡顿附近存在数据中断或采集异常"))
+        XCTAssertEqual(presentation.integrityIssues.map(\.kind), [.providerError])
+        XCTAssertEqual(presentation.integrityIssues.map(\.scope), [.monitoringSession])
+    }
+
+    func testDroppedMessagesUseSessionCumulativeScopeAndUnknownTiming() {
+        let presentation = PerformanceDiagnosticPresenter.lagPresentation(
+            summary: summary(droppedCount: 3, confidence: .incomplete),
+            processDisplayName: { $0 }
+        )
+
+        XCTAssertTrue(presentation.dataIntegrityDetail.contains("本次监控会话累计"))
+        XCTAssertTrue(presentation.dataIntegrityDetail.contains("3 条采集消息丢弃"))
+        XCTAssertTrue(presentation.dataIntegrityDetail.contains("具体发生时间无法确认"))
+        XCTAssertFalse(presentation.overview.contains("卡顿附近存在数据中断或采集异常"))
+        XCTAssertEqual(presentation.integrityIssues.map(\.kind), [.droppedMessage])
+        XCTAssertEqual(presentation.integrityIssues.map(\.scope), [.monitoringSession])
+    }
+
+    func testBothLagViewsDelegateToSharedLagPresenter() throws {
+        let repositoryRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let viewPaths = [
+            "Sources/iPhoneMonitor/Views/Performance/LagSummaryView.swift",
+            "Sources/iPhoneMonitor/Views/Performance/PerformanceDiagnosticView.swift"
+        ]
+
+        for path in viewPaths {
+            let source = try String(contentsOf: repositoryRoot.appendingPathComponent(path), encoding: .utf8)
+            XCTAssertTrue(
+                source.contains("PerformanceDiagnosticPresenter.lagPresentation("),
+                "\(path) must keep using the shared lag presentation"
+            )
+        }
     }
 
     func testGoodHighCPUAndMemoryGrowthKeepsMeasuredOverview() {
@@ -139,6 +193,7 @@ final class PerformanceDiagnosticPresentationTests: XCTestCase {
             ["处理器活动处于最近一段时间的较高水平", "观察到应用内存增长"]
         )
         XCTAssertEqual(presentation.dataIntegrity, "良好")
+        XCTAssertTrue(presentation.dataIntegrityDetail.contains("截至摘要生成时"))
     }
 
     func testNeutralAndInsufficientLagSummariesStayMeasured() {

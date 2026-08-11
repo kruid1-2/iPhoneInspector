@@ -24,6 +24,7 @@ public struct PerformanceLagProcessPresentation: Equatable, Sendable, Identifiab
 
 public struct PerformanceLagDiagnosticPresentation: Equatable, Sendable {
     public let confidence: LagDataConfidence
+    public let integrityIssues: [LagIntegrityIssue]
     public let overview: String
     public let phenomena: [String]
     public let relatedProcesses: [PerformanceLagProcessPresentation]
@@ -111,6 +112,7 @@ public enum PerformanceDiagnosticPresenter {
 
         return PerformanceLagDiagnosticPresentation(
             confidence: summary.confidence,
+            integrityIssues: summary.integrityIssues,
             overview: lagOverview(summary, processDisplayNames: names),
             phenomena: phenomena,
             relatedProcesses: relatedProcesses,
@@ -260,7 +262,22 @@ public enum PerformanceDiagnosticPresenter {
         processDisplayNames: [String]
     ) -> String {
         if summary.confidence == .incomplete {
-            return "卡顿附近存在数据中断或采集异常，以下观察参考有限。"
+            let hasDependencyGap = summary.integrityIssues.contains {
+                $0.kind == .streamGap && $0.scope == .analysisDependencyWindow
+            }
+            let hasSessionWarning = summary.integrityIssues.contains {
+                $0.scope == .monitoringSession
+            }
+            if hasDependencyGap, hasSessionWarning {
+                return "本次卡顿分析依赖范围内存在数据中断，且本次监控会话曾记录无法定位时间的采集异常，以下观察参考有限。"
+            }
+            if hasDependencyGap {
+                return "本次卡顿分析依赖范围内存在数据中断，以下观察参考有限。"
+            }
+            if hasSessionWarning {
+                return "本次监控会话曾记录无法定位时间的采集异常，以下观察参考有限。"
+            }
+            return "采集完整性不足，以下观察参考有限。"
         }
         if hasInsufficientLagData(summary) {
             return "现有数据不足，暂时无法概括卡顿附近的变化；建议再次出现时继续标记。"
@@ -345,7 +362,7 @@ public enum PerformanceDiagnosticPresenter {
 
     private static func dataIntegrityDetail(_ summary: PerformanceLagSummary) -> String {
         guard summary.confidence == .incomplete else {
-            return "采集期间未记录数据中断、数据源错误或队列丢弃。"
+            return "本次卡顿分析依赖范围内未记录数据中断；截至摘要生成时，本次监控会话未记录采集组件异常或采集消息丢弃。"
         }
 
         var details: [String] = []
@@ -353,17 +370,17 @@ public enum PerformanceDiagnosticPresenter {
             let duration = summary.streamGapSeconds > 0
                 ? String(format: "约 %.1f 秒", summary.streamGapSeconds)
                 : "时长未知"
-            details.append("\(summary.streamGapCount) 次数据中断（\(duration)）")
+            details.append("本次卡顿分析依赖范围内记录 \(summary.streamGapCount) 次数据中断（\(duration)）")
         }
         if summary.providerErrorCount > 0 {
-            details.append("\(summary.providerErrorCount) 次数据源错误")
+            details.append("截至摘要生成时，本次监控会话曾记录 \(summary.providerErrorCount) 次采集组件异常，发生时间无法确认")
         }
         if summary.droppedCount > 0 {
-            details.append("\(summary.droppedCount) 条队列丢弃")
+            details.append("截至摘要生成时，本次监控会话累计记录 \(summary.droppedCount) 条采集消息丢弃，具体发生时间无法确认")
         }
         if details.isEmpty {
             return "采集完整性不足，部分观察可能不完整。"
         }
-        return details.joined(separator: "、") + "，部分观察可能不完整。"
+        return details.joined(separator: "；") + "；部分观察可能不完整。"
     }
 }
