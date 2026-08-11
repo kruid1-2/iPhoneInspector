@@ -123,6 +123,34 @@ final class PerformanceTimelineTests: XCTestCase {
         XCTAssertEqual(Set(series.compactMap(\.processIdentity)).count, 2)
     }
 
+    func testPIDReuseWithSameNameAndChangedStartAbsTimeCreatesSeparateSeries() throws {
+        let batches = [
+            try processBatch(
+                sequence: 1,
+                offsetSeconds: 1,
+                pid: 42,
+                name: "SameProcess",
+                cpu: 1,
+                memoryMiB: 10,
+                startAbsTime: 100
+            ),
+            try processBatch(
+                sequence: 2,
+                offsetSeconds: 2,
+                pid: 42,
+                name: "SameProcess",
+                cpu: 2,
+                memoryMiB: 20,
+                startAbsTime: 200
+            )
+        ]
+        let frame = PerformanceTimelineBuilder.build(input: makeInput(processes: batches), range: .all)
+        let series = frame.series(kind: .processCPU).filter { $0.pid == 42 }
+
+        XCTAssertEqual(series.count, 2)
+        XCTAssertEqual(Set(series.compactMap(\.processIdentity)).count, 2)
+    }
+
     func testObserverOverheadIsNotAutomaticallyRecommended() throws {
         let batches = [
             try processBatch(sequence: 1, offsetSeconds: 1, pid: 1, name: "DTServiceHub", cpu: 999, memoryMiB: 10, observer: true),
@@ -294,9 +322,22 @@ final class PerformanceTimelineTests: XCTestCase {
         name: String,
         cpu: Double,
         memoryMiB: Double,
-        observer: Bool = false
+        observer: Bool = false,
+        startAbsTime: Double? = nil
     ) throws -> ProcessPerformanceBatch {
-        try XCTUnwrap(ProcessPerformanceBatch(message: message(
+        var metrics: [String: Any] = [
+            "cpuUsage": metric(cpu, field: "cpuUsage"),
+            "physFootprint": metric(
+                memoryMiB * 1_048_576,
+                field: "physFootprint",
+                display: memoryMiB,
+                displayUnit: "MiB"
+            )
+        ]
+        if let startAbsTime {
+            metrics["startAbsTime"] = metric(startAbsTime, field: "startAbsTime")
+        }
+        return try XCTUnwrap(ProcessPerformanceBatch(message: message(
             type: "process_batch",
             sequence: sequence,
             offsetSeconds: offsetSeconds,
@@ -306,15 +347,7 @@ final class PerformanceTimelineTests: XCTestCase {
                     "pid": pid,
                     "name": name,
                     "monitor_overhead": observer,
-                    "metrics": [
-                        "cpuUsage": metric(cpu, field: "cpuUsage"),
-                        "physFootprint": metric(
-                            memoryMiB * 1_048_576,
-                            field: "physFootprint",
-                            display: memoryMiB,
-                            displayUnit: "MiB"
-                        )
-                    ]
+                    "metrics": metrics
                 ]]
             ]
         )))
