@@ -531,7 +531,7 @@ public enum PerformanceTimelineBuilder {
             for process: ProcessPerformanceSample,
             state: inout [Int: ProcessIdentityState]
         ) -> String {
-            let startToken = ["startTime", "start_time", "procStartTime", "processStartTime"]
+            let startToken = ["startAbsTime", "startTime", "start_time", "procStartTime", "processStartTime"]
                 .compactMap { process.metric($0)?.value?.displayString }
                 .first
             let token = "\(process.name)|\(startToken ?? "unknown-start")"

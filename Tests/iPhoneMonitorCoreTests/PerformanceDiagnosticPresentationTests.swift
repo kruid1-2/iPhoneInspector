@@ -106,7 +106,7 @@ final class PerformanceDiagnosticPresentationTests: XCTestCase {
         )
 
         XCTAssertTrue(neutral.overview.contains("没有观察到单一、明确的同步变化"))
-        XCTAssertEqual(neutral.processDisplayNames, ["微信", "SpringBoard（系统界面）"])
+        XCTAssertEqual(neutral.processDisplayNames, ["微信", "SpringBoard（系统界面）", "相机"])
         XCTAssertEqual(neutral.dataIntegrity, "良好")
         XCTAssertTrue(insufficient.overview.hasPrefix("现有数据不足"))
         XCTAssertTrue(insufficient.phenomena.contains("用于比较的数据不足"))

@@ -84,7 +84,7 @@ public enum PerformanceDiagnosticPresenter {
         summary: PerformanceLagSummary,
         processDisplayNames: [String]
     ) -> PerformanceLagDiagnosticPresentation {
-        let names = Array(processDisplayNames.prefix(2))
+        let names = Array(processDisplayNames.prefix(3))
         let phenomena = lagPhenomena(summary)
 
         return PerformanceLagDiagnosticPresentation(
