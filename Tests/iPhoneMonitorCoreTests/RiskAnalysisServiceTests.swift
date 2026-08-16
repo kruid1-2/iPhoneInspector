@@ -36,6 +36,26 @@ final class RiskAnalysisServiceTests: XCTestCase {
         )
     }
 
+    func testHardFreeStorageAloneDoesNotCreateLowStorageRisk() {
+        let storage = StorageInformation(
+            totalBytes: .available(120_092_147_712, source: "USB"),
+            hardFreeBytes: .available(
+                3_714_256_896,
+                source: "USB",
+                rawFieldName: "AmountDataAvailable"
+            )
+        )
+
+        XCTAssertEqual(service.storageRiskLevel(storage), .insufficient)
+        let findings = service.analyze(
+            device: nil,
+            battery: BatteryInformation(),
+            storage: storage,
+            records: []
+        )
+        XCTAssertNil(findings.first { $0.id == "storage-low" })
+    }
+
     func testMultiplePanicsProduceHighRisk() {
         let now = Date()
         let records = (0..<3).map { index in

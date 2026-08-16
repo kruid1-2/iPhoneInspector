@@ -30,4 +30,37 @@ final class CapacityAndModelTests: XCTestCase {
         )
         XCTAssertNil(contradictory.usageFraction)
     }
+
+    func testStorageHardFreeValueBecomesStale() {
+        let storage = StorageInformation(
+            hardFreeBytes: .available(
+                3_700_000_000,
+                source: "libimobiledevice",
+                rawFieldName: "AmountDataAvailable"
+            )
+        )
+
+        XCTAssertEqual(storage.markedStale().hardFreeBytes.availability, .stale)
+        XCTAssertTrue(storage.hasAnyValue)
+    }
+
+    func testStorageDecodesLegacyJSONWithoutHardFreeValue() throws {
+        let original = StorageInformation(
+            totalBytes: .available(128_000_000_000, source: "legacy")
+        )
+        let encoded = try JSONEncoder().encode(original)
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        object.removeValue(forKey: "hardFreeBytes")
+        let legacyData = try JSONSerialization.data(withJSONObject: object)
+
+        let decoded = try JSONDecoder().decode(
+            StorageInformation.self,
+            from: legacyData
+        )
+
+        XCTAssertNil(decoded.hardFreeBytes.value)
+        XCTAssertEqual(decoded.hardFreeBytes.availability, .notReturned)
+    }
 }
