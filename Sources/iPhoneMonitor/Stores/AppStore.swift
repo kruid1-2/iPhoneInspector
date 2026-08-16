@@ -149,6 +149,10 @@ final class AppStore: ObservableObject {
            fallback.reclaimableBytes.value != nil {
             result.reclaimableBytes = fallback.reclaimableBytes
         }
+        if result.hardFreeBytes.value == nil,
+           fallback.hardFreeBytes.value != nil {
+            result.hardFreeBytes = fallback.hardFreeBytes
+        }
         result.updatedAt = result.updatedAt ?? fallback.updatedAt
         return result
     }

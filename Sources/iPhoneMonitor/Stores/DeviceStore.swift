@@ -199,6 +199,10 @@ final class DeviceStore: ObservableObject {
             stale.totalBytes.detail = detail
             stale.availableBytes.detail = detail
             stale.usedBytes.detail = detail
+            stale.hardFreeBytes = reconcile(
+                previous.hardFreeBytes,
+                refreshed.hardFreeBytes
+            )
             return stale
         }
         return StorageInformation(
@@ -211,6 +215,10 @@ final class DeviceStore: ObservableObject {
             reclaimableBytes: reconcile(
                 previous.reclaimableBytes,
                 refreshed.reclaimableBytes
+            ),
+            hardFreeBytes: reconcile(
+                previous.hardFreeBytes,
+                refreshed.hardFreeBytes
             ),
             updatedAt: refreshed.updatedAt ?? previous.updatedAt
         )
