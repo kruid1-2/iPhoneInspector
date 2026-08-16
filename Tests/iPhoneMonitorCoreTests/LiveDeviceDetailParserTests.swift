@@ -131,7 +131,7 @@ final class LiveDeviceDetailParserTests: XCTestCase {
         XCTAssertFalse(result.errors.isEmpty)
     }
 
-    func testStorageXMLComputesOnlyValidatedSameDomainValues() throws {
+    func testStorageXMLClassifiesAmountDataAvailableAsHardFree() throws {
         let xml = plist([
             "TotalDataCapacity": "<integer>128000000000</integer>",
             "AmountDataAvailable": "<integer>12000000000</integer>"
@@ -142,20 +142,15 @@ final class LiveDeviceDetailParserTests: XCTestCase {
         )
 
         XCTAssertEqual(storage.totalBytes.value, 128_000_000_000)
-        XCTAssertEqual(storage.availableBytes.value, 12_000_000_000)
-        XCTAssertEqual(storage.usedBytes.value, 116_000_000_000)
-        XCTAssertEqual(
-            try XCTUnwrap(storage.usageFraction),
-            0.90625,
-            accuracy: 0.00001
-        )
-        XCTAssertEqual(
-            storage.usedBytes.rawFieldName,
-            "TotalDataCapacity - AmountDataAvailable"
-        )
+        XCTAssertNil(storage.availableBytes.value)
+        XCTAssertEqual(storage.availableBytes.availability, .notReturned)
+        XCTAssertEqual(storage.hardFreeBytes.value, 12_000_000_000)
+        XCTAssertEqual(storage.hardFreeBytes.rawFieldName, "AmountDataAvailable")
+        XCTAssertNil(storage.usedBytes.value)
+        XCTAssertNil(storage.usageFraction)
     }
 
-    func testIOS26StoragePrefersDataCapacityPairOverPhysicalDiskCapacity() throws {
+    func testIOS26StorageRetainsDataCapacityAndHardFreeValue() throws {
         let xml = plist([
             "AmountDataAvailable": "<integer>18514563072</integer>",
             "AmountDataReserved": "<integer>209715200</integer>",
@@ -173,14 +168,12 @@ final class LiveDeviceDetailParserTests: XCTestCase {
 
         XCTAssertEqual(storage.totalBytes.value, 120_092_147_712)
         XCTAssertEqual(storage.totalBytes.rawFieldName, "TotalDataCapacity")
-        XCTAssertEqual(storage.availableBytes.value, 18_514_563_072)
-        XCTAssertEqual(storage.availableBytes.rawFieldName, "AmountDataAvailable")
-        XCTAssertEqual(storage.usedBytes.value, 101_577_584_640)
-        XCTAssertEqual(
-            try XCTUnwrap(storage.usageFraction),
-            0.8458302549,
-            accuracy: 0.000001
-        )
+        XCTAssertNil(storage.availableBytes.value)
+        XCTAssertEqual(storage.availableBytes.availability, .notReturned)
+        XCTAssertEqual(storage.hardFreeBytes.value, 18_514_563_072)
+        XCTAssertEqual(storage.hardFreeBytes.rawFieldName, "AmountDataAvailable")
+        XCTAssertNil(storage.usedBytes.value)
+        XCTAssertNil(storage.usageFraction)
     }
 
     func testStorageDoesNotCalculateAcrossDataAndDiskCapacityFamilies() throws {
@@ -193,12 +186,13 @@ final class LiveDeviceDetailParserTests: XCTestCase {
             data: Data(xml.utf8)
         )
 
+        XCTAssertEqual(storage.hardFreeBytes.value, 18_514_563_072)
         XCTAssertNil(storage.usedBytes.value)
-        XCTAssertEqual(storage.usedBytes.availability, .parseFailed)
+        XCTAssertEqual(storage.usedBytes.availability, .notReturned)
         XCTAssertNil(storage.usageFraction)
     }
 
-    func testDetailMergePrefersCompleteCoherentStorageResult() {
+    func testDetailMergePrefersStorageResultWithHardFreeEvidence() {
         let devicectl = DeviceDetailResult(
             storage: StorageInformation(
                 totalBytes: .available(
@@ -215,15 +209,10 @@ final class LiveDeviceDetailParserTests: XCTestCase {
                     source: "libimobiledevice / com.apple.disk_usage",
                     rawFieldName: "TotalDataCapacity"
                 ),
-                availableBytes: .available(
+                hardFreeBytes: .available(
                     18_514_563_072,
                     source: "libimobiledevice / com.apple.disk_usage",
                     rawFieldName: "AmountDataAvailable"
-                ),
-                usedBytes: .available(
-                    101_577_584_640,
-                    source: "libimobiledevice / com.apple.disk_usage",
-                    rawFieldName: "TotalDataCapacity - AmountDataAvailable"
                 )
             )
         )
@@ -234,9 +223,10 @@ final class LiveDeviceDetailParserTests: XCTestCase {
         ])
 
         XCTAssertEqual(merged.storage.totalBytes.value, 120_092_147_712)
-        XCTAssertEqual(merged.storage.availableBytes.value, 18_514_563_072)
-        XCTAssertEqual(merged.storage.usedBytes.value, 101_577_584_640)
-        XCTAssertNotNil(merged.storage.usageFraction)
+        XCTAssertNil(merged.storage.availableBytes.value)
+        XCTAssertEqual(merged.storage.hardFreeBytes.value, 18_514_563_072)
+        XCTAssertNil(merged.storage.usedBytes.value)
+        XCTAssertNil(merged.storage.usageFraction)
     }
 
     func testStorageRejectsContradictoryCapacityValues() throws {
