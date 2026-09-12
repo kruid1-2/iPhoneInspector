@@ -242,3 +242,7 @@ ideviceinfo -u <UDID> -q com.apple.disk_usage -x
 - 第一版不会完整解析 sysdiagnose 中的所有数据库。
 - App 存储分类、实时 CPU、实时温度和完整进程列表不可用时不会猜测。
 - 开发构建使用临时签名，不等同于公证发行版本。
+
+## 许可证
+
+本项目使用 [MIT License](LICENSE)。
