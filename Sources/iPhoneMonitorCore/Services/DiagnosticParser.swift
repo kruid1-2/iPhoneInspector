@@ -229,44 +229,42 @@ public struct DiagnosticParser: Sendable {
         let source: String
         let total: Int64?
         let available: Int64?
+        let hardFree: Int64?
         let totalRawField: String?
         let availableRawField: String?
-        if dataTotal != nil, dataAvailable != nil {
+        let hardFreeRawField: String?
+        if dataTotal != nil || dataAvailable != nil {
             source = dataSource
             total = dataTotal
-            available = dataAvailable
-            totalRawField = "TotalDataCapacity"
-            availableRawField = "AmountDataAvailable"
-        } else if diskTotal != nil, diskAvailable != nil {
-            source = diskSource
-            total = diskTotal
-            available = diskAvailable
-            totalRawField = "TotalDiskCapacity"
-            availableRawField = "AmountDiskAvailable"
-        } else if dataTotal != nil || dataAvailable != nil {
-            source = dataSource
-            total = dataTotal
-            available = dataAvailable
+            available = nil
+            hardFree = dataAvailable
             totalRawField = dataTotal == nil ? nil : "TotalDataCapacity"
-            availableRawField = dataAvailable == nil ? nil : "AmountDataAvailable"
+            availableRawField = nil
+            hardFreeRawField = dataAvailable == nil ? nil : "AmountDataAvailable"
         } else if diskTotal != nil || diskAvailable != nil {
             source = diskSource
             total = diskTotal
             available = diskAvailable
+            hardFree = nil
             totalRawField = diskTotal == nil ? nil : "TotalDiskCapacity"
             availableRawField = diskAvailable == nil ? nil : "AmountDiskAvailable"
+            hardFreeRawField = nil
         } else if let freeGB = DiagnosticTextParser.freeStorageGB(from: text) {
             source = "诊断日志 / free storage summary"
             total = nil
             available = Int64(freeGB * 1_024 * 1_024 * 1_024)
+            hardFree = nil
             totalRawField = nil
             availableRawField = "FreeStorageGB"
+            hardFreeRawField = nil
         } else {
             source = "导入的诊断日志"
             total = nil
             available = nil
+            hardFree = nil
             totalRawField = nil
             availableRawField = nil
+            hardFreeRawField = nil
         }
         let now = Date()
         let used: Int64?
@@ -294,7 +292,13 @@ public struct DiagnosticParser: Sendable {
                     confidence: .medium,
                     updatedAt: now
                 )
-            } ?? .missing(.notReturned, source: source),
+            } ?? .missing(
+                .notReturned,
+                source: source,
+                detail: hardFree == nil
+                    ? nil
+                    : "日志只返回硬空闲空间，未返回与 iPhone 设置一致的用户可用空间"
+            ),
             usedBytes: used.map {
                 .available(
                     $0,
@@ -308,7 +312,19 @@ public struct DiagnosticParser: Sendable {
                     updatedAt: now
                 )
             } ?? .missing(.notReturned, source: source),
-            updatedAt: total != nil || available != nil ? now : nil
+            hardFreeBytes: hardFree.map {
+                .available(
+                    $0,
+                    source: source,
+                    rawFieldName: hardFreeRawField,
+                    detail: "严格的当前硬空闲空间，不含 iOS 可回收内容",
+                    confidence: .medium,
+                    updatedAt: now
+                )
+            } ?? .missing(.notReturned, source: source),
+            updatedAt: total != nil || available != nil || hardFree != nil
+                ? now
+                : nil
         )
     }
 

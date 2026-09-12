@@ -52,7 +52,6 @@ public enum DeviceDetailOutputParser {
         "CapacityBytes"
     ]
     private static let availableStorageKeys = [
-        "AmountDataAvailable",
         "AmountDiskAvailable",
         "AvailableDataCapacity",
         "AvailableDiskCapacity",
@@ -60,10 +59,13 @@ public enum DeviceDetailOutputParser {
         "FreeDiskSpace",
         "FreeBytes"
     ]
+    private static let hardFreeStorageKeys = [
+        "AmountDataAvailable"
+    ]
     private static let storageFieldPairs: [([String], [String])] = [
         (
             ["TotalDataCapacity"],
-            ["AmountDataAvailable", "AvailableDataCapacity"]
+            ["AvailableDataCapacity"]
         ),
         (
             ["TotalDiskCapacity", "DiskCapacity"],
@@ -154,6 +156,7 @@ public enum DeviceDetailOutputParser {
             storage: storage(
                 totalMatch: storageMatches.total,
                 availableMatch: storageMatches.available,
+                hardFreeMatch: storageMatches.hardFree,
                 defaultSource: "devicectl",
                 updatedAt: now
             )
@@ -398,6 +401,11 @@ public enum DeviceDetailOutputParser {
                 availability,
                 source: source,
                 detail: detail
+            ),
+            hardFreeBytes: .missing(
+                availability,
+                source: source,
+                detail: detail
             )
         )
     }
@@ -503,30 +511,50 @@ public enum DeviceDetailOutputParser {
         return storage(
             totalMatch: matches.total,
             availableMatch: matches.available,
+            hardFreeMatch: matches.hardFree,
             defaultSource: source,
             updatedAt: updatedAt
         )
     }
 
+    private struct StorageMatches {
+        let total: LocatedValue?
+        let available: LocatedValue?
+        let hardFree: LocatedValue?
+    }
+
     private static func storageMatches(
         in object: Any
-    ) -> (total: LocatedValue?, available: LocatedValue?) {
+    ) -> StorageMatches {
+        let hardFree = LocatedValue.first(
+            in: object,
+            aliases: hardFreeStorageKeys
+        )
         for pair in storageFieldPairs {
             let total = LocatedValue.first(in: object, aliases: pair.0)
             let available = LocatedValue.first(in: object, aliases: pair.1)
             if total != nil, available != nil {
-                return (total, available)
+                return StorageMatches(
+                    total: total,
+                    available: available,
+                    hardFree: hardFree
+                )
             }
         }
-        return (
-            LocatedValue.first(in: object, aliases: totalStorageKeys),
-            LocatedValue.first(in: object, aliases: availableStorageKeys)
+        return StorageMatches(
+            total: LocatedValue.first(in: object, aliases: totalStorageKeys),
+            available: LocatedValue.first(
+                in: object,
+                aliases: availableStorageKeys
+            ),
+            hardFree: hardFree
         )
     }
 
     private static func storage(
         totalMatch: LocatedValue?,
         availableMatch: LocatedValue?,
+        hardFreeMatch: LocatedValue?,
         defaultSource: String,
         updatedAt: Date
     ) -> StorageInformation {
@@ -535,11 +563,19 @@ public enum DeviceDetailOutputParser {
             defaultSource: defaultSource,
             updatedAt: updatedAt
         )
-        let available = capacityField(
+        var available = capacityField(
             availableMatch,
             defaultSource: defaultSource,
             updatedAt: updatedAt
         )
+        let hardFree = capacityField(
+            hardFreeMatch,
+            defaultSource: defaultSource,
+            updatedAt: updatedAt
+        )
+        if available.value == nil, hardFree.value != nil {
+            available.detail = "当前工具只返回硬空闲空间，未返回与 iPhone 设置一致的用户可用空间"
+        }
 
         let used: DataValue<Int64>
         if let totalBytes = total.value, let availableBytes = available.value {
@@ -552,6 +588,7 @@ public enum DeviceDetailOutputParser {
                         source: defaultSource,
                         detail: "总容量与可用容量来自不同数据域，未计算已使用容量"
                     ),
+                    hardFreeBytes: hardFree,
                     updatedAt: updatedAt
                 )
             }
@@ -567,6 +604,7 @@ public enum DeviceDetailOutputParser {
                         source: defaultSource,
                         detail: "总容量与可用容量字段口径不同，未计算已使用容量"
                     ),
+                    hardFreeBytes: hardFree,
                     updatedAt: updatedAt
                 )
             }
@@ -579,6 +617,7 @@ public enum DeviceDetailOutputParser {
                         source: total.source,
                         detail: "总容量小于可用容量，未计算已使用容量"
                     ),
+                    hardFreeBytes: hardFree,
                     updatedAt: updatedAt
                 )
             }
@@ -617,7 +656,10 @@ public enum DeviceDetailOutputParser {
             totalBytes: total,
             availableBytes: available,
             usedBytes: used,
-            updatedAt: total.value != nil || available.value != nil
+            hardFreeBytes: hardFree,
+            updatedAt: total.value != nil
+                || available.value != nil
+                || hardFree.value != nil
                 ? updatedAt
                 : nil
         )
@@ -885,9 +927,19 @@ public enum DeviceDetailOutputParser {
         fallback: StorageInformation
     ) -> StorageInformation {
         if primary.totalBytes.value != nil || primary.availableBytes.value != nil {
-            return primary
+            var result = primary
+            if result.hardFreeBytes.value == nil,
+               fallback.hardFreeBytes.value != nil {
+                result.hardFreeBytes = fallback.hardFreeBytes
+            }
+            return result
         }
-        return fallback
+        var result = fallback
+        if result.hardFreeBytes.value == nil,
+           primary.hardFreeBytes.value != nil {
+            result.hardFreeBytes = primary.hardFreeBytes
+        }
+        return result
     }
 
     private static func prefer<Value>(

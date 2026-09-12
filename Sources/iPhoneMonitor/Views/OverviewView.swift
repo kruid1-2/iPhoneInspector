@@ -47,8 +47,8 @@ struct OverviewView: View {
                     )
                     batteryCard
                     MetricCard(
-                        title: "可用存储",
-                        value: AppFormatters.bytes(appStore.effectiveStorage.availableBytes.value),
+                        title: "存储空间",
+                        value: storageValue,
                         detail: storageDetail,
                         systemImage: "internaldrive",
                         tint: .indigo
@@ -195,10 +195,28 @@ struct OverviewView: View {
     }
 
     private var storageDetail: String {
-        if let fraction = appStore.effectiveStorage.usageFraction {
+        let presentation = StorageOverviewPresentation.resolve(
+            appStore.effectiveStorage
+        )
+        if let hardFree = presentation.hardFreeBytes {
+            return "当前硬空闲 \(AppFormatters.bytes(hardFree))（不含可回收空间）"
+        }
+        if let fraction = presentation.usageFraction {
             return "已使用 \(Int(fraction * 100))%"
         }
-        return appStore.effectiveStorage.availableBytes.availability.message
+        return appStore.effectiveStorage.availableBytes.detail
+            ?? appStore.effectiveStorage.availableBytes.availability.message
+    }
+
+    private var storageValue: String {
+        switch StorageOverviewPresentation.resolve(
+            appStore.effectiveStorage
+        ).primaryValue {
+        case let .userAvailable(bytes):
+            return AppFormatters.bytes(bytes)
+        case .settingsRequired:
+            return "请在 iPhone 设置中查看"
+        }
     }
 
     private var actionableRisks: [RiskFinding] {

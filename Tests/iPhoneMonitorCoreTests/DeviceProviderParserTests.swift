@@ -135,7 +135,13 @@ final class DeviceProviderParserTests: XCTestCase {
         XCTAssertEqual(result.battery.isCharging.value, false)
         XCTAssertEqual(result.battery.cycleCount.value, 421)
         XCTAssertEqual(result.storage.totalBytes.value, 128_000_000_000)
-        XCTAssertEqual(result.storage.availableBytes.value, 12_000_000_000)
-        XCTAssertEqual(result.storage.usedBytes.value, 116_000_000_000)
+        XCTAssertNil(result.storage.availableBytes.value)
+        XCTAssertEqual(result.storage.hardFreeBytes.value, 12_000_000_000)
+        XCTAssertEqual(
+            result.storage.hardFreeBytes.rawFieldName,
+            "AmountDataAvailable"
+        )
+        XCTAssertNil(result.storage.usedBytes.value)
+        XCTAssertNil(result.storage.usageFraction)
     }
 }

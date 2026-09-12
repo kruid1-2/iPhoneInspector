@@ -339,7 +339,8 @@ public struct DeviceInformationService: Sendable {
             storage.totalBytes.value,
             storage.availableBytes.value,
             storage.usedBytes.value,
-            storage.reclaimableBytes.value
+            storage.reclaimableBytes.value,
+            storage.hardFreeBytes.value
         ].compactMap { $0 }.count
         return valueCount + (storage.usageFraction == nil ? 0 : 100)
     }

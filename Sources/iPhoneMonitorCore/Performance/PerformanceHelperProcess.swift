@@ -10,12 +10,56 @@ public enum PerformanceHelperProcessEvent: Equatable, Sendable {
     case exited(status: Int32)
 }
 
+public struct PerformanceSystemErrorCode: Equatable, Sendable {
+    public let domain: String
+    public let code: Int
+
+    public init(domain: String, code: Int) {
+        self.domain = domain
+        self.code = code
+    }
+}
+
+public struct PerformanceHelperLaunchFailure: Equatable, Sendable {
+    public let detail: String
+    public let errorCodes: [PerformanceSystemErrorCode]
+
+    public init(error: Error) {
+        let rootError = error as NSError
+        detail = rootError.localizedDescription
+
+        var codes: [PerformanceSystemErrorCode] = []
+        var currentError: NSError? = rootError
+        var visited: Set<ObjectIdentifier> = []
+        while let current = currentError, codes.count < 8 {
+            guard visited.insert(ObjectIdentifier(current)).inserted else { break }
+            codes.append(PerformanceSystemErrorCode(domain: current.domain, code: current.code))
+            currentError = current.userInfo[NSUnderlyingErrorKey] as? NSError
+        }
+        errorCodes = codes
+    }
+
+    public var isFileAccessDenied: Bool {
+        errorCodes.contains { errorCode in
+            if errorCode.domain == NSPOSIXErrorDomain {
+                return errorCode.code == Int(POSIXErrorCode.EACCES.rawValue)
+                    || errorCode.code == Int(POSIXErrorCode.EPERM.rawValue)
+            }
+            if errorCode.domain == NSCocoaErrorDomain {
+                return errorCode.code == CocoaError.Code.fileReadNoPermission.rawValue
+                    || errorCode.code == CocoaError.Code.fileWriteNoPermission.rawValue
+            }
+            return false
+        }
+    }
+}
+
 public enum PerformanceHelperProcessError: LocalizedError, Equatable, Sendable {
     case alreadyRunning
     case notRunning
     case inputClosed
     case invalidCommand
-    case launchFailed(String)
+    case launchFailed(PerformanceHelperLaunchFailure)
 
     public var errorDescription: String? {
         switch self {
@@ -23,7 +67,7 @@ public enum PerformanceHelperProcessError: LocalizedError, Equatable, Sendable {
         case .notRunning: return "Performance Helper 尚未运行"
         case .inputClosed: return "Performance Helper stdin 已关闭"
         case .invalidCommand: return "无法编码 Helper 控制消息"
-        case .launchFailed(let detail): return "Performance Helper 启动失败：\(detail)"
+        case .launchFailed(let failure): return "Performance Helper 启动失败：\(failure.detail)"
         }
     }
 }
@@ -126,7 +170,12 @@ public final class PerformanceHelperProcess: PerformanceHelperProcessControlling
                 self?.inputHandle = nil
                 self?.process = nil
             }
+            AppLogger.performance.info(
+                "helper termination handler status=\(process.terminationStatus, privacy: .public)"
+            )
         }
+
+        AppLogger.performance.info("helper stdout/stderr readers installed")
 
         do {
             try child.run()
@@ -137,8 +186,16 @@ public final class PerformanceHelperProcess: PerformanceHelperProcessControlling
                 process = nil
                 inputHandle = nil
             }
-            throw PerformanceHelperProcessError.launchFailed(error.localizedDescription)
+            let failure = PerformanceHelperLaunchFailure(error: error)
+            let codes = failure.errorCodes
+                .map { "\($0.domain):\($0.code)" }
+                .joined(separator: ",")
+            AppLogger.performance.error(
+                "helper Process.run failed file_access_denied=\(failure.isFileAccessDenied, privacy: .public) codes=\(codes, privacy: .public)"
+            )
+            throw PerformanceHelperProcessError.launchFailed(failure)
         }
+        AppLogger.performance.info("helper Process launched pid=\(child.processIdentifier, privacy: .public)")
         continuation.yield(.started(pid: child.processIdentifier, location: location))
     }
 
@@ -166,6 +223,7 @@ public final class PerformanceHelperProcess: PerformanceHelperProcessControlling
         let owned: Process? = lock.withLock { process }
         guard let owned, owned.isRunning else { return }
         let pid = owned.processIdentifier
+        AppLogger.performance.info("terminating owned helper pid=\(pid, privacy: .public)")
         owned.terminate()
         DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 2) { [weak owned] in
             guard let owned, owned.isRunning, owned.processIdentifier == pid else { return }

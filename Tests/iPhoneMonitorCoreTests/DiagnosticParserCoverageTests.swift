@@ -55,6 +55,26 @@ final class DiagnosticParserCoverageTests: XCTestCase {
         XCTAssertEqual(parsed.battery.cycleCount.value, 612)
     }
 
+    func testAmountDataAvailableIsParsedAsHardFreeStorage() {
+        let parsed = parser.parse(
+            text: """
+            TotalDataCapacity: 120092147712
+            AmountDataAvailable: 3714256896
+            """,
+            fileName: "disk-usage.log"
+        )
+
+        XCTAssertEqual(parsed.storage.totalBytes.value, 120_092_147_712)
+        XCTAssertEqual(parsed.storage.hardFreeBytes.value, 3_714_256_896)
+        XCTAssertEqual(
+            parsed.storage.hardFreeBytes.rawFieldName,
+            "AmountDataAvailable"
+        )
+        XCTAssertNil(parsed.storage.availableBytes.value)
+        XCTAssertNil(parsed.storage.usedBytes.value)
+        XCTAssertNil(parsed.storage.usageFraction)
+    }
+
     func testUnknownFormatPreservesSummary() {
         let parsed = parser.parse(
             text: "some future iOS diagnostic structure",

@@ -11,7 +11,7 @@ struct StorageView: View {
             VStack(alignment: .leading, spacing: 18) {
                 PageHeader(
                     title: "存储",
-                    subtitle: "容量来自设备工具或导入日志；无法读取 App 分类占用时不会进行推测。"
+                    subtitle: "区分 iPhone 设置口径与 USB 硬空闲读数；无法验证时不会进行推测。"
                 )
 
                 SectionCard("容量概览") {
@@ -32,9 +32,18 @@ struct StorageView: View {
                         Divider()
                         storageField("总容量", storage.totalBytes)
                         Divider()
-                        storageField("已使用容量", storage.usedBytes)
+                        storageField(
+                            "设置口径可用空间",
+                            storage.availableBytes,
+                            guidance: "请以 iPhone 设置 → 通用 → iPhone 储存空间为准"
+                        )
                         Divider()
-                        storageField("可用容量", storage.availableBytes)
+                        storageField(
+                            "当前硬空闲空间（不含可回收空间）",
+                            storage.hardFreeBytes
+                        )
+                        Divider()
+                        storageField("已使用容量", storage.usedBytes)
                         Divider()
                         storageField("可清理空间", storage.reclaimableBytes)
                     }
@@ -45,7 +54,7 @@ struct StorageView: View {
                         Label("可用空间低于总容量 15%：提醒", systemImage: "info.circle")
                         Label("可用空间低于总容量 8%：较高风险", systemImage: "exclamationmark.triangle")
                         Label("可用空间低于 5 GB：高风险", systemImage: "exclamationmark.octagon")
-                        Text("规则统一由 RiskAnalysisService 计算，不在界面中臆测可清理容量。")
+                        Text("阈值只应用于可信的设置口径可用空间，不应用于当前硬空闲读数。")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -77,13 +86,18 @@ struct StorageView: View {
         }
     }
 
-    private func storageField(_ title: String, _ field: DataValue<Int64>) -> some View {
-        DataFieldRow(
+    private func storageField(
+        _ title: String,
+        _ field: DataValue<Int64>,
+        guidance: String? = nil
+    ) -> some View {
+        let details = [field.detail, guidance].compactMap { $0 }
+        return DataFieldRow(
             title: title,
             value: field.value.map { AppFormatters.bytes($0) },
             availability: isDemo ? .demo : field.availability,
             source: field.source,
-            detail: field.detail,
+            detail: details.isEmpty ? nil : details.joined(separator: "；"),
             updatedAt: field.updatedAt
         )
     }

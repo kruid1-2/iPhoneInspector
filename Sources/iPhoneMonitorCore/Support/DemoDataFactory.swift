@@ -49,6 +49,11 @@ public enum DemoDataFactory {
             totalBytes: .available(total, source: source),
             availableBytes: .available(available, source: source),
             usedBytes: .available(total - available, source: source),
+            hardFreeBytes: .available(
+                Int64(8 * 1_024 * 1_024 * 1_024),
+                source: source,
+                rawFieldName: "AmountDataAvailable"
+            ),
             updatedAt: Date()
         )
     }

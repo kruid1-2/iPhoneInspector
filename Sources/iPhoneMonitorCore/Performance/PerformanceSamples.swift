@@ -254,7 +254,7 @@ public struct PerformanceProviderError: Equatable, Sendable, Identifiable {
     public let isolated: Bool
 
     public init?(message: PerformanceMessage) {
-        guard message.type == .providerError || message.type == .commandError else { return nil }
+        guard message.type == .providerError else { return nil }
         id = message.sequence ?? message.monotonicNS ?? 0
         timestamp = message.timestamp
         provider = message.payload.string("provider") ?? message.source ?? "helper"

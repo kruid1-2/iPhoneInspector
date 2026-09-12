@@ -17,7 +17,6 @@ final class PerformanceMonitorStore: ObservableObject {
 
     @Published private(set) var state: PerformanceSessionState = .idle
     @Published private(set) var helperPID: Int32?
-    @Published private(set) var helperSource: PerformanceHelperLocation.Source?
     private(set) var capability: PerformanceCapability?
     private(set) var lastUpdate: Date?
     private(set) var sessionStartedAt: Date?
@@ -53,11 +52,11 @@ final class PerformanceMonitorStore: ObservableObject {
     private var flushTask: Task<Void, Never>?
     private var elapsedTask: Task<Void, Never>?
     private var lifecycleShutdownTask: Task<Void, Never>?
-    private var startupRetryTask: Task<Void, Never>?
     private var timelineBuildTask: Task<Void, Never>?
     private var lagSummaryTask: Task<Void, Never>?
     private var pendingMessages: [PerformanceMessage] = []
     private var timelineVisible = false
+    private var diagnosisVisible = false
     private var timelineBuildGeneration: UInt64 = 0
     private var timelineDirty = false
     private var activeTimelineSessionID: String?
@@ -99,7 +98,6 @@ final class PerformanceMonitorStore: ObservableObject {
         elapsedTask?.cancel()
         timelineBuildTask?.cancel()
         lagSummaryTask?.cancel()
-        startupRetryTask?.cancel()
     }
 
     var canStart: Bool {
@@ -114,6 +112,11 @@ final class PerformanceMonitorStore: ObservableObject {
 
     func setTimelineVisible(_ visible: Bool) {
         timelineVisible = visible
+        if visible { scheduleTimelineBuild(force: true) }
+    }
+
+    func setDiagnosisVisible(_ visible: Bool) {
+        diagnosisVisible = visible
         if visible { scheduleTimelineBuild(force: true) }
     }
 
@@ -136,42 +139,45 @@ final class PerformanceMonitorStore: ObservableObject {
 
     func startMonitoring() {
         guard canStart else { return }
+        AppLogger.performance.info("start button pressed state=\(self.state.rawValue, privacy: .public)")
         operationInFlight = true
         lastError = nil
         resetSessionData()
         let config = PerformanceMonitoringConfiguration(enableOSLog: oslogEnabled)
         Task { [weak self] in
             guard let self else { return }
-            await performStart(config: config, allowFreshTaskRetry: true)
+            await performStart(config: config)
         }
     }
 
-    private func performStart(
-        config: PerformanceMonitoringConfiguration,
-        allowFreshTaskRetry: Bool
-    ) async {
+    private func performStart(config: PerformanceMonitoringConfiguration) async {
         do {
             try await service.startMonitoring(config: config)
-        } catch let firstError as PerformanceMonitorServiceError {
-            if case .timedOut("helper_ready") = firstError, allowFreshTaskRetry {
-                warningBuffer.append("Helper 首次冷启动未就绪，已清理精确 PID 并进行一次新任务重试")
-                compatibilityWarnings = warningBuffer.elements
-                // A fresh main-actor task matches the empirically reliable
-                // second-button invocation, while keeping the UI operation
-                // disabled and allowing only one retry.
-                startupRetryTask = Task { [weak self] in
-                    try? await Task.sleep(nanoseconds: 3_000_000_000)
-                    guard let self, !Task.isCancelled else { return }
-                    await performStart(config: config, allowFreshTaskRetry: false)
-                }
-                return
-            }
-            lastError = firstError.localizedDescription
+            AppLogger.performance.info("start request reached monitoring state")
+        } catch let serviceError as PerformanceMonitorServiceError {
+            await presentStartupFailure(serviceError)
         } catch {
-            lastError = error.localizedDescription
+            await presentStartupFailure(error)
         }
-        startupRetryTask = nil
         operationInFlight = false
+    }
+
+    private func presentStartupFailure(_ error: Error) async {
+        let diagnostic = AppLogger.redactedDiagnostic(error.localizedDescription)
+        let location = await service.lastHelperLocation
+        let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+        let documentsAccessMayBeRelevant = PerformanceStartupFailurePresenter.documentsAccessMayBeRelevant(
+            for: location,
+            documentDirectoryURL: documentsURL
+        )
+        let presentation = PerformanceStartupFailurePresenter.presentation(
+            for: error,
+            documentsAccessMayBeRelevant: documentsAccessMayBeRelevant
+        )
+        AppLogger.performance.error(
+            "start request failed state=\(self.state.rawValue, privacy: .public) kind=\(presentation.kind.rawValue, privacy: .public) error=\(diagnostic, privacy: .public)"
+        )
+        lastError = presentation.userMessage
     }
 
     func stopMonitoring() {
@@ -213,8 +219,6 @@ final class PerformanceMonitorStore: ObservableObject {
             return
         }
 
-        startupRetryTask?.cancel()
-        startupRetryTask = nil
         operationInFlight = true
         let task = Task { await service.shutdown() }
         lifecycleShutdownTask = task
@@ -250,8 +254,8 @@ final class PerformanceMonitorStore: ObservableObject {
                 elapsedTask?.cancel()
                 elapsedTask = nil
             }
-        case .helperLocated(let source):
-            helperSource = source
+        case .helperLocated:
+            break
         case .helperStarted(let pid):
             helperPID = pid
         case .message(let message):
@@ -341,12 +345,16 @@ final class PerformanceMonitorStore: ObservableObject {
                     gapsChanged = true
                     receivedTimelineData = true
                 }
-            case .providerError, .commandError:
+            case .providerError:
                 if let error = PerformanceProviderError(message: message) {
                     errorBuffer.append(error)
                     errorsChanged = true
                     lastError = "\(error.provider)：\(error.summary)"
                 }
+            case .commandError:
+                // PerformanceMonitorService records the redacted diagnostic and
+                // the startup presenter owns the concise user-facing failure.
+                break
             case .userMarker:
                 if let marker = PerformanceUserMarker(message: message) {
                     markerBuffer.append(marker)
@@ -394,7 +402,7 @@ final class PerformanceMonitorStore: ObservableObject {
     }
 
     private func scheduleTimelineBuild(force: Bool = false) {
-        guard timelineVisible, force || timelineDirty,
+        guard (timelineVisible || diagnosisVisible), force || timelineDirty,
               let sessionID = activeTimelineSessionID,
               let startMonotonic = sessionStartMonotonicNS
         else { return }

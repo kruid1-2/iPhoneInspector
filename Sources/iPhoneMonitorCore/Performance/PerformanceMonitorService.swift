@@ -3,6 +3,8 @@ import Foundation
 public enum PerformanceMonitorServiceError: LocalizedError, Equatable, Sendable {
     case invalidTransition(from: PerformanceSessionState, action: String)
     case timedOut(String)
+    case helperLocation(PerformanceHelperLocatorError)
+    case helperProcess(PerformanceHelperProcessError)
     case helperError(String)
     case processExited(Int32)
 
@@ -12,6 +14,10 @@ public enum PerformanceMonitorServiceError: LocalizedError, Equatable, Sendable 
             return "当前状态 \(state.label) 不允许执行 \(action)"
         case .timedOut(let action):
             return "等待 \(action) 超时"
+        case .helperLocation(let error):
+            return error.localizedDescription
+        case .helperProcess(let error):
+            return error.localizedDescription
         case .helperError(let detail):
             return detail
         case .processExited(let status):
@@ -36,6 +42,7 @@ public actor PerformanceMonitorService {
     public private(set) var state: PerformanceSessionState = .idle
     public private(set) var activeSessionID: String?
     public private(set) var helperPID: Int32?
+    public private(set) var lastHelperLocation: PerformanceHelperLocation?
 
     private let continuation: AsyncStream<PerformanceMonitorServiceEvent>.Continuation
     private let locator: any PerformanceHelperLocating
@@ -53,6 +60,8 @@ public actor PerformanceMonitorService {
     private var processExited = false
     private var expectedProcessExit = false
     private var latestError: PerformanceMonitorServiceError?
+    private var helperLaunchStartedNS: UInt64?
+    private var sessionStartCommandNS: UInt64?
 
     public init(
         locator: any PerformanceHelperLocating = PerformanceHelperLocator(),
@@ -78,6 +87,7 @@ public actor PerformanceMonitorService {
     }
 
     public func startMonitoring(config: PerformanceMonitoringConfiguration) async throws {
+        AppLogger.performance.info("startMonitoring requested state=\(self.state.rawValue, privacy: .public)")
         switch state {
         case .idle, .helperFailed, .connectionLost:
             try await startHelper()
@@ -97,6 +107,11 @@ public actor PerformanceMonitorService {
             try helperProcess.send(
                 .startSession(config: config, requestID: "swift-start-\(UUID().uuidString)")
             )
+            sessionStartCommandNS = DispatchTime.now().uptimeNanoseconds
+            AppLogger.performance.info("start_session sent")
+        } catch let error as PerformanceHelperProcessError {
+            await abnormalCleanup(reason: "start_session 写入失败：\(error.localizedDescription)")
+            throw PerformanceMonitorServiceError.helperProcess(error)
         } catch {
             await abnormalCleanup(reason: "start_session 写入失败：\(error.localizedDescription)")
             throw PerformanceMonitorServiceError.helperError(error.localizedDescription)
@@ -173,16 +188,25 @@ public actor PerformanceMonitorService {
     }
 
     private func startHelper() async throws {
+        helperLaunchStartedNS = DispatchTime.now().uptimeNanoseconds
+        lastHelperLocation = nil
+        AppLogger.performance.info("helper launch requested")
         setState(.locatingHelper)
         let location: PerformanceHelperLocation
         do {
             location = try locator.locate()
+        } catch let error as PerformanceHelperLocatorError {
+            latestError = .helperLocation(error)
+            setState(.helperFailed)
+            throw latestError!
         } catch {
             latestError = .helperError(error.localizedDescription)
             setState(.helperFailed)
             throw latestError!
         }
+        lastHelperLocation = location
         continuation.yield(.helperLocated(location.source))
+        AppLogger.performance.info("helper located source=\(location.source.rawValue, privacy: .public)")
 
         setState(.startingHelper)
         let process = processFactory()
@@ -202,6 +226,14 @@ public actor PerformanceMonitorService {
         }
         do {
             try process.start(at: location, arguments: processArguments)
+            AppLogger.performance.info("helper Process.run returned successfully")
+        } catch let error as PerformanceHelperProcessError {
+            helperProcess = nil
+            processTask?.cancel()
+            processTask = nil
+            latestError = .helperProcess(error)
+            setState(.helperFailed)
+            throw latestError!
         } catch {
             helperProcess = nil
             processTask?.cancel()
@@ -241,10 +273,13 @@ public actor PerformanceMonitorService {
         case .started(let pid, _):
             helperPID = pid
             continuation.yield(.helperStarted(pid: pid))
+            AppLogger.performance.info("helper process launched pid=\(pid, privacy: .public)")
         case .stdoutLine(let line):
             handleDecoded(decoder.decode(line: line))
         case .stderrLine(let line):
             continuation.yield(.stderr(line))
+            let diagnostic = AppLogger.redactedDiagnostic(line)
+            AppLogger.performance.info("helper stderr: \(diagnostic, privacy: .public)")
         case .stdoutClosed:
             guard !expectedProcessExit, helperProcess?.isRunning == true else { return }
             latestError = .helperError("Performance Helper stdout 已关闭")
@@ -252,10 +287,14 @@ public actor PerformanceMonitorService {
             await abnormalCleanup(reason: "stdout EOF", finalState: .connectionLost)
         case .stderrClosed:
             continuation.yield(.stderr("Performance Helper stderr 已关闭"))
+            AppLogger.performance.info("helper stderr closed")
         case .exited(let status):
             helperPID = nil
             processExited = true
             continuation.yield(.processExited(status: status, expected: expectedProcessExit))
+            AppLogger.performance.info(
+                "helper exited pid_cleared=true status=\(status, privacy: .public) expected=\(self.expectedProcessExit, privacy: .public)"
+            )
             if !expectedProcessExit {
                 latestError = .processExited(status)
                 setState(activeSessionID == nil ? .helperFailed : .connectionLost)
@@ -285,9 +324,13 @@ public actor PerformanceMonitorService {
 
             switch message.type {
             case .helperReady:
+                let elapsed = elapsedMilliseconds(since: helperLaunchStartedNS)
+                AppLogger.performance.info("helper_ready received elapsed_ms=\(elapsed, privacy: .public)")
                 setState(.helperReady)
             case .sessionStarted:
                 activeSessionID = message.sessionID
+                let elapsed = elapsedMilliseconds(since: sessionStartCommandNS)
+                AppLogger.performance.info("session_started received elapsed_ms=\(elapsed, privacy: .public)")
                 setState(.monitoring)
             case .sessionEnded:
                 sessionEndedSeen = true
@@ -295,8 +338,13 @@ public actor PerformanceMonitorService {
                 if state == .stoppingSession { setState(.helperReady) }
             case .helperShutdown:
                 helperShutdownSeen = true
+                AppLogger.performance.info("helper_shutdown received")
             case .commandError:
                 let detail = message.payload.string("error") ?? "Helper 返回 command_error"
+                let diagnostic = AppLogger.redactedDiagnostic(detail)
+                AppLogger.performance.error(
+                    "command_error received state=\(self.state.rawValue, privacy: .public) detail=\(diagnostic, privacy: .public)"
+                )
                 latestError = .helperError(detail)
                 if state == .startingSession || state == .startingHelper {
                     setState(.helperFailed)
@@ -357,6 +405,9 @@ public actor PerformanceMonitorService {
         while !predicate() {
             if let latestError { throw latestError }
             if DispatchTime.now().uptimeNanoseconds >= deadline {
+                AppLogger.performance.error(
+                    "startup wait timed out step=\(description, privacy: .public) state=\(self.state.rawValue, privacy: .public)"
+                )
                 throw PerformanceMonitorServiceError.timedOut(description)
             }
             try await Task.sleep(nanoseconds: 50_000_000)
@@ -367,6 +418,10 @@ public actor PerformanceMonitorService {
         reason: String,
         finalState: PerformanceSessionState = .helperFailed
     ) async {
+        let diagnostic = AppLogger.redactedDiagnostic(reason)
+        AppLogger.performance.error(
+            "helper cleanup begin state=\(self.state.rawValue, privacy: .public) pid=\(self.helperPID ?? -1, privacy: .public) reason=\(diagnostic, privacy: .public)"
+        )
         continuation.yield(.compatibilityWarning("异常清理当前 Helper：\(reason)"))
         expectedProcessExit = true
         helperProcess?.terminateOwnedProcess()
@@ -381,6 +436,7 @@ public actor PerformanceMonitorService {
         processTask?.cancel()
         processTask = nil
         setState(finalState)
+        AppLogger.performance.info("helper cleanup end final_state=\(finalState.rawValue, privacy: .public)")
     }
 
     private func finishCleanly() {
@@ -392,11 +448,21 @@ public actor PerformanceMonitorService {
         latestError = nil
         expectedProcessExit = false
         setState(.idle)
+        AppLogger.performance.info("helper lifecycle finished cleanly")
     }
 
     private func setState(_ newState: PerformanceSessionState) {
         guard state != newState else { return }
+        let previous = state
         state = newState
+        AppLogger.performance.info(
+            "performance state transition from=\(previous.rawValue, privacy: .public) to=\(newState.rawValue, privacy: .public)"
+        )
         continuation.yield(.stateChanged(newState))
+    }
+
+    private func elapsedMilliseconds(since startedNS: UInt64?) -> UInt64 {
+        guard let startedNS else { return 0 }
+        return (DispatchTime.now().uptimeNanoseconds - startedNS) / 1_000_000
     }
 }
