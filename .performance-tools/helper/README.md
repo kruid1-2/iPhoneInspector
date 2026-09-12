@@ -5,6 +5,10 @@
 提供器各自保留一条长生命周期 DVT 连接，避免 oslog 阻塞 sysmontap；不会在每个采样周期
 重新启动 CLI、tunnel 或开发者服务。
 
+依赖版本记录在 `requirements-lock.txt`。Intel Mac 上的 `cryptography 50.0.0` 需要
+Rust 工具链从源码构建；安装时应先单独升级到锁定的 pip 版本，再安装其余依赖，避免
+在同一次 pip 进程中升级 pip 自身。
+
 ## 协议
 
 - stdin：一行一个 JSON 控制消息。

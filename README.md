@@ -75,6 +75,10 @@ USB 连接的未越狱 iPhone，并在本地分析用户主动导入的诊断日
 - Intel 与 Apple Silicon 均可构建；本项目已在 Intel `x86_64` Mac 上验证
 - 不要求 Homebrew
 
+实时性能 Helper 使用 Python 3.13。当前锁定的 `cryptography 50.0.0` 在 Intel Mac
+上需要从源码构建，因此自行创建 Helper 环境时还需要 Rust 工具链；Apple Silicon
+若可直接取得兼容 wheel，则不需要本地编译该依赖。
+
 Swift Package Manager 入口：
 
 ```bash
@@ -250,3 +254,7 @@ ideviceinfo -u <UDID> -q com.apple.disk_usage -x
 - 第一版不会完整解析 sysdiagnose 中的所有数据库。
 - App 存储分类、实时 CPU、实时温度和完整进程列表不可用时不会猜测。
 - 开发构建使用临时签名，不等同于公证发行版本。
+
+## 许可证
+
+本项目采用 [MIT License](LICENSE)。
